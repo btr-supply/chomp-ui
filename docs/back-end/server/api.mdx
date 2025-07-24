@@ -1,0 +1,995 @@
+# Chomp API Documentation
+
+## Overview
+
+The Chomp API provides access to a high-performance data ingestion framework with real-time and historical data endpoints. The API supports both time series data (for continuous monitoring) and update records (for entity management like users).
+
+### API Structure & Router Prefixes
+
+The Chomp API is organized into logical router groups with consistent URL prefixes:
+
+- **Root Data Endpoints** (`/`): Core data retrieval, schema, analysis endpoints
+- **Authentication** (`/auth/*`): All authentication methods and session management
+- **Configuration** (`/config/*`): Configuration file management and versioning
+- **Administration** (`/admin/*`): System monitoring, ingester control, user management
+- **WebSocket** (`/ws`): Real-time data streaming and subscriptions
+
+## Base URL
+
+```
+http://localhost:40004
+```
+
+## Authentication
+
+The Chomp API provides a unified authentication system supporting multiple methods through the `/auth` endpoint:
+
+**Base Auth Route**: `/auth/*` (all authentication endpoints are prefixed with `/auth`)
+
+- **Web3 Wallet Authentication**: EVM (Ethereum & cie.), SVM (Solana & cie.), and Sui wallet signature authentication
+- **OAuth2 Social Authentication**: GitHub and Twitter/X authentication
+- **Static Token Authentication**: Bearer token authentication for admin access
+- **Anonymous Access**: Public data retrieval with rate limiting
+
+All authentication methods return **JWT tokens** for session management with configurable expiration times.
+
+### Unified Authentication Flow
+
+The authentication system uses a challenge-response pattern for Web3 wallets and direct authentication for other methods.
+
+#### GET `/auth/methods`
+Get available authentication methods and OAuth2 provider status.
+
+**Response:**
+```json
+{
+  "available_methods": ["static", "evm", "svm", "sui", "oauth2_github", "oauth2_x"],
+  "oauth2_providers": {
+    "github": true,
+    "x": false
+  }
+}
+```
+
+### Web3 Wallet Authentication
+
+#### Step 1: Create Challenge
+**POST `/auth/challenge`**
+
+Create a signing challenge for Web3 wallet authentication.
+
+**Request:**
+```json
+{
+  "auth_method": "evm|svm|sui",
+  "identifier": "wallet_address"
+}
+```
+
+**Response:**
+```json
+{
+  "challenge_id": "unique_challenge_id",
+  "message": "Welcome to Chomp! By signing this message, you agree to our Terms of Service and are logging in on 15-01-2024 12:30:00 UTC.\n\nAddress: 0x1234...\nChallenge: abc123...\n\nThis request will not trigger a blockchain transaction or cost any gas fees.",
+  "expires_at": "2024-01-15T12:35:00Z"
+}
+```
+
+#### Step 2: Verify Signature
+**POST `/auth/verify`**
+
+Submit the signed challenge for verification.
+
+**Request:**
+```json
+{
+  "challenge_id": "challenge_id_from_step_1",
+  "credentials": {
+    "address": "wallet_address",
+    "signature": "signed_message_hex"
+  }
+}
+```
+
+**Response:**
+```json
+{
+  "access_token": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...",
+  "token_type": "bearer",
+  "user_id": "wallet_address",
+  "provider": "evm|svm|sui",
+  "expires_hours": 24
+}
+```
+
+### Direct Authentication
+
+#### POST `/auth/direct`
+For authentication methods that don't require a challenge (static tokens, OAuth2 codes).
+
+**Static Token Example:**
+```json
+{
+  "auth_method": "static",
+  "credentials": {
+    "token": "your-static-token"
+  }
+}
+```
+
+**OAuth2 Example:**
+```json
+{
+  "auth_method": "oauth2_github",
+  "credentials": {
+    "code": "authorization_code_from_oauth_callback"
+  }
+}
+```
+
+### OAuth2 Social Authentication
+
+**⚠️ CRITICAL LIMITATION**: OAuth2 is **NOT compatible with https://cho.mp**. OAuth2 requires deterministic backend callback URLs (e.g., `${BACKEND_URL}/auth/github/callback`) that must be pre-registered with OAuth2 providers. Since cho.mp connects to arbitrary user-selected backends, providers cannot know callback URLs in advance.
+
+**OAuth2 Available On**: Hosted deployments with predictable frontend/backend domain relationships only.
+
+#### GitHub Authentication Flow (Hosted Deployments Only)
+1. **GET `/auth/github/login`** - Get GitHub OAuth2 authorization URL
+2. User authorizes on GitHub (redirects to callback)
+3. **GET `/auth/github/callback`** - Handle OAuth2 callback and return JWT token
+
+#### Twitter/X Authentication Flow (Hosted Deployments Only)
+1. **GET `/auth/x/login`** - Get Twitter OAuth2 authorization URL
+2. User authorizes on Twitter (redirects to callback)
+3. **GET `/auth/x/callback`** - Handle OAuth2 callback and return JWT token
+
+### Session Management
+
+#### Check Authentication Status
+**GET `/auth/status`**
+
+**Headers:**
+```
+Authorization: Bearer your_jwt_token
+```
+
+**Response:**
+```json
+{
+  "authenticated": true,
+  "message": "Valid session",
+  "user_id": "user_identifier"
+}
+```
+
+#### Logout
+**POST `/auth/logout`**
+
+**Headers:**
+```
+Authorization: Bearer your_jwt_token
+```
+
+Invalidates the current session. Returns HTTP 204 (No Content).
+
+### Challenge Management
+
+#### Get Challenge Status
+**GET `/auth/challenge/{challenge_id}`**
+
+Check the status of a pending authentication challenge.
+
+#### Cancel Challenge
+**DELETE `/auth/challenge/{challenge_id}`**
+
+Cancel a pending authentication challenge.
+
+## Core Data Endpoints
+
+**Base Data Route**: `/` (core data endpoints are at the root level, no prefix)
+
+### Server Information
+
+#### GET `/`
+#### GET `/info`
+Get basic server information and status.
+
+**Response:**
+```json
+{
+  "engine": "chomp",
+  "version": "1.1.0",
+  "name": "Chomp Data Ingester",
+  "description": "High-performance data ingestion framework",
+  "status": "ok",
+  "timestamp": "2024-01-15T12:30:00Z"
+}
+```
+
+#### GET `/ping`
+Health check endpoint.
+
+**Response:**
+```json
+{
+  "status": "ok",
+  "timestamp": "2024-01-15T12:30:00Z"
+}
+```
+
+#### GET `/status`
+Get system status and health information.
+
+#### GET `/docs`
+#### GET `/index`
+Returns HTML documentation interface.
+
+### Schema & Resources
+
+#### GET `/schema`
+Get the schema of all available resources.
+
+**Query Parameters:**
+- `scope` (string): Scope for schema details (default: "default")
+- `include_transient` (boolean): Include transient fields
+- `include_protected` (boolean): Include protected resources
+
+#### GET `/schema/{resources}`
+Get schema for specific resources with advanced filtering.
+
+**Parameters:**
+- `resources` (path): Comma-separated resource names or patterns
+- `fields` (string): Specific fields to include
+- `name` (string): Regex pattern for ingester names
+- `tag` (string): Regex pattern for tags
+- `ingester_type` (string): Exact match for ingester type
+- `resource_type` (string): Exact match for resource type
+- `field_type` (string): Regex pattern for field types
+
+**Example:**
+```bash
+curl "http://localhost:40004/schema/BinanceFeeds,CoinbaseFeeds?tag=CEX"
+```
+
+#### GET `/resources`
+Get all available resources with filtering options.
+
+**Query Parameters:**
+- `include_transient` (boolean): Include transient fields
+- `include_protected` (boolean): Include protected resources (requires auth)
+
+### Time Series Data
+
+#### GET `/last/{resources}`
+#### GET `/last`
+Get the most recent data for specified resources.
+
+**Parameters:**
+- `resources` (path): Comma-separated resource names
+- `quote` (string): Quote currency for price conversion
+- `precision` (integer): Decimal precision (default: 6)
+
+**Example:**
+```bash
+curl "http://localhost:40004/last/BinanceFeeds.BTCUSDT,CoinbaseFeeds.BTCUSD"
+```
+
+#### GET `/history/{resources}`
+#### GET `/history`
+Get historical data for specified resources.
+
+**Parameters:**
+- `resources` (path): Comma-separated resource names
+- `fields` (string): Specific fields to retrieve
+- `from_date` (string): Start date (ISO format)
+- `to_date` (string): End date (ISO format)
+- `interval` (string): Aggregation interval (e.g., "m5", "h1", "d1")
+- `target_epochs` (integer): Target number of data points
+- `precision` (integer): Decimal precision
+- `quote` (string): Quote currency
+- `format` (string): Response format ("json:row", "json:col", "csv")
+
+**Example:**
+```bash
+curl "http://localhost:40004/history/BinanceFeeds.BTCUSDT?from_date=2024-01-01&interval=h1&format=json:row"
+```
+
+### Analysis Endpoints
+
+#### GET `/analysis/{resources}`
+#### GET `/analysis`
+Get comprehensive technical analysis for resources.
+
+**Parameters:**
+- `resources` (path): Resource names
+- `fields` (string): Fields to analyze
+- `from_date`, `to_date` (string): Date range
+- `periods` (string): Comma-separated periods (default: "20")
+- `precision` (integer): Decimal precision
+- `quote` (string): Quote currency
+- `format` (string): Response format
+
+#### GET `/volatility/{resources}`
+Get volatility analysis for resources.
+
+#### GET `/trend/{resources}`
+Get trend analysis for resources.
+
+#### GET `/momentum/{resources}`
+Get momentum analysis for resources.
+
+#### GET `/oprange/{resources}`
+Get operating range analysis for resources.
+
+### Conversion Utilities
+
+#### GET `/convert/{pair}`
+#### GET `/convert`
+Convert between currency pairs.
+
+**Parameters:**
+- `pair` (path): Currency pair (e.g., "BTC/USD")
+- `base_amount` (float): Amount in base currency
+- `quote_amount` (float): Amount in quote currency
+- `precision` (integer): Decimal precision
+
+#### GET `/pegcheck/{pair}`
+#### GET `/pegcheck`
+Check if a currency pair maintains its peg.
+
+**Parameters:**
+- `pair` (path): Currency pair
+- `factor` (float): Expected ratio (default: 1.0)
+- `max_deviation` (float): Maximum allowed deviation (default: 0.002)
+- `precision` (integer): Decimal precision
+
+### User Limits
+
+#### GET `/limits`
+Get current rate limits for the authenticated user.
+
+**Response:**
+```json
+{
+  "user_id": "ip:abc123...",
+  "limits": {
+    "rpm": {"current": 5, "max": 60, "remaining": 55},
+    "rph": {"current": 25, "max": 1200, "remaining": 1175},
+    "rpd": {"current": 125, "max": 9600, "remaining": 9475},
+    "ppm": {"current": 10, "max": 60, "remaining": 50},
+    "pph": {"current": 50, "max": 1200, "remaining": 1150},
+    "ppd": {"current": 250, "max": 9600, "remaining": 9350}
+  },
+  "status": "within_limits"
+}
+```
+
+### Generic Resource Management
+
+#### GET `/list/{resource}`
+Get paginated list of records for a specific resource type.
+
+**Parameters:**
+- `resource` (path): Resource name (e.g., "user", "users")
+- `limit` (integer): Maximum records (1-1000, default: 100)
+- `offset` (integer): Pagination offset (default: 0)
+- `include_transient` (boolean): Include transient fields
+
+#### GET `/list`
+Get batch list of records for multiple resource types.
+
+**Parameters:**
+- `resources` (string): Comma-separated resource names
+- `limit`, `offset`, `include_transient`: Same as single resource
+
+#### GET `/{resource}/{uid}`
+#### GET `/{resource}?uid={uid}`
+Get a specific record by UID.
+
+**Parameters:**
+- `resource` (path): Resource name
+- `uid` (path/query): Resource UID
+- `include_transient` (boolean): Include transient fields
+
+## WebSocket Endpoints
+
+**Base WebSocket Route**: `/ws` (WebSocket endpoint for real-time data streaming)
+
+### Real-time Data Streaming
+
+#### `WS /ws`
+WebSocket endpoint for real-time data subscriptions.
+
+**Authentication:**
+- Query parameter: `?token=<jwt_token>`
+- Header: `Authorization: Bearer <token>`
+- Anonymous connections allowed (with restrictions)
+
+**Point Costs:**
+- Base subscription cost: 10 points
+- Per topic cost: 2 points each
+- Total cost = 10 + (2 × number_of_topics)
+
+### WebSocket Messages
+
+#### Subscribe to Topics
+```json
+{
+  "action": "subscribe",
+  "topics": ["chomp:BinanceFeeds.BTCUSDT", "chomp:CoinbaseFeeds.BTCUSD"]
+}
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "subscribed": ["chomp:BinanceFeeds.BTCUSDT", "chomp:CoinbaseFeeds.BTCUSD"],
+  "points_consumed": 14,
+  "rejected": [],
+  "reason": ""
+}
+```
+
+#### Unsubscribe from Topics
+```json
+{
+  "action": "unsubscribe",
+  "topics": ["chomp:BinanceFeeds.BTCUSDT"]
+}
+```
+
+#### Ping/Keepalive
+```json
+{"action": "ping"}
+```
+
+**Response:**
+```json
+{"pong": true}
+```
+
+### WebSocket Authorization
+
+- **Public users**: Cannot subscribe to protected resources (sys.*, admin.*)
+- **Authenticated users**: Can subscribe to all authorized resources
+- **Protected fields**: Filtered out for non-authenticated users
+
+### Topic Patterns
+
+Topics follow the pattern: `chomp:<resource_name>`
+
+Examples:
+- `chomp:BinanceFeeds.BTCUSDT` - Public market data
+- `chomp:sys.users.monitor` - Protected system resource (auth required)
+
+## Configuration Management
+
+**Base Config Route**: `/config/*` (all configuration endpoints are prefixed with `/config`)
+
+### Ingester Configuration
+
+#### GET `/config/ingester`
+Get the current ingester configuration.
+
+#### POST `/config/ingester/validate`
+Validate an ingester configuration without applying it.
+
+**Request:**
+```json
+{
+  "config_content": "yaml configuration content",
+  "validate_only": true
+}
+```
+
+#### POST `/config/ingester/update`
+Update the ingester configuration.
+
+**Request:**
+```json
+{
+  "config_content": "yaml configuration content",
+  "validate_only": false,
+  "restart_affected": true
+}
+```
+
+#### POST `/config/ingester/upload`
+Upload ingester configuration file.
+
+#### GET `/config/ingester/history`
+Get ingester configuration change history.
+
+### Server Configuration
+
+#### GET `/config/server`
+Get the current server configuration.
+
+#### POST `/config/server/validate`
+Validate server configuration without applying it.
+
+#### POST `/config/server/update`
+Update the server configuration.
+
+#### POST `/config/server/upload`
+Upload server configuration file.
+
+#### GET `/config/server/history`
+Get server configuration change history.
+
+### Generic Configuration
+
+#### POST `/config/rollback`
+Rollback to previous configuration version.
+
+**Request:**
+```json
+{
+  "steps_back": 1,
+  "config_type": "ingester"
+}
+```
+
+#### GET `/config/history`
+Get configuration change history for one or both config types.
+
+**Parameters:**
+- `limit` (integer): Maximum number of history entries (1-100, default: 10)
+- `config_type` (string): "ingester", "server", or "both" (default: "both")
+
+### Legacy Configuration Endpoints (Backward Compatibility)
+
+The following endpoints are maintained for backward compatibility:
+- `GET /config/config` - Maps to ingester config
+- `POST /config/config/validate` - Maps to ingester validation
+- `POST /config/config/update` - Maps to ingester update
+- `POST /config/config/upload` - Maps to ingester upload
+- `GET /config/config/history` - Maps to ingester history
+- `POST /config/config/rollback` - Maps to ingester rollback
+
+## Admin Endpoints
+
+**Base Admin Route**: `/admin/*` (all admin endpoints are prefixed with `/admin`)
+
+All admin endpoints require authentication and are protected by the `/admin/*` route pattern.
+
+### Test Endpoint
+
+#### GET `/admin/test`
+Simple test endpoint to verify admin router functionality.
+
+**Response:**
+```json
+{
+  "status": "admin router working",
+  "timestamp": "2024-01-15T12:30:00Z"
+}
+```
+
+### Ingester Management
+
+#### GET `/admin/ingesters`
+Get status of all ingesters.
+
+**Response:**
+```json
+{
+  "ingesters": [
+    {
+      "name": "BinanceFeeds",
+      "status": "running",
+      "last_ingested": "2024-01-15T12:30:00Z",
+      "cached": true,
+      "streamed": true,
+      "field_count": 15,
+      "uptime": null,
+      "last_error": null,
+      "resource_usage": {
+        "latency_ms": 45,
+        "response_bytes": 2048,
+        "status_code": 200
+      }
+    }
+  ],
+  "total_count": 1,
+  "running_count": 1,
+  "timestamp": "2024-01-15T12:30:00Z"
+}
+```
+
+#### GET `/admin/ingesters/{ingester_name}`
+Get detailed information about a specific ingester.
+
+#### POST `/admin/ingesters/control`
+Control multiple ingesters.
+
+**Request:**
+```json
+{
+  "action": "restart",
+  "ingester_names": ["BinanceFeeds", "CoinbaseFeeds"],
+  "force": false
+}
+```
+
+#### POST `/admin/ingesters/{ingester_name}/restart`
+Restart specific ingester.
+
+### System Monitoring
+
+#### GET `/admin/system/logs`
+Get system logs with filtering.
+
+**Parameters:**
+- `level` (string): Log level (default: "INFO")
+- `limit` (integer): Maximum entries (default: 100)
+- `since` (string): Start time filter
+
+**Response:**
+```json
+{
+  "logs": [
+    {
+      "timestamp": "2024-01-15T12:30:00Z",
+      "level": "INFO",
+      "message": "Ingester BinanceFeeds started successfully"
+    }
+  ],
+  "count": 1,
+  "level": "INFO",
+  "limit": 100
+}
+```
+
+#### GET `/admin/database/status`
+Get database connection status.
+
+**Response:**
+```json
+{
+  "database": "TDengine",
+  "status": "connected",
+  "uptime": "24h 13m 20s",
+  "tables": 256
+}
+```
+
+#### GET `/admin/database/tables`
+Get list of database tables.
+
+**Response:**
+```json
+{
+  "tables": [
+    "BinanceFeeds",
+    "CoinbaseFeeds",
+    "sys_users",
+    "sys_ingester_status"
+  ],
+  "count": 4
+}
+```
+
+#### GET `/admin/cache/status`
+Get Redis cache status.
+
+**Response:**
+```json
+{
+  "redis_version": "7.2.1",
+  "mode": "cluster",
+  "connected_clients": 12,
+  "memory_used_mb": 32,
+  "hits": 125000,
+  "misses": 2400
+}
+```
+
+#### POST `/admin/cache/clear`
+Clear cache entries.
+
+**Parameters:**
+- `pattern` (string): Key pattern to clear (optional)
+
+**Response:**
+```json
+{
+  "success": true,
+  "cleared_count": 128,
+  "pattern": "ingester:*",
+  "timestamp": "2024-01-15T12:30:00Z"
+}
+```
+
+#### GET `/admin/registry/{registry_type}`
+Get registry data for specific type.
+
+**Parameters:**
+- `registry_type` (path): Registry type ("instances" or "ingesters")
+
+**Response (for `registry_type: "instances"`):**
+```json
+{
+  "registry_instances": [
+    {
+      "instance_id": "chomp-instance-1",
+      "last_heartbeat": "2024-01-15T12:29:55Z",
+      "ingesters": ["BinanceFeeds", "CoinbaseFeeds"]
+    }
+  ],
+  "total_count": 1,
+  "timestamp": "2024-01-15T12:30:00Z",
+  "source": "registry"
+}
+```
+
+### User Management
+
+#### POST `/admin/users/status`
+Update user status.
+
+**Request:**
+```json
+{
+  "user_uid": "user_id_here",
+  "status": "admin"
+}
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "User status updated successfully",
+  "user_id": "user_id_here",
+  "new_status": "admin"
+}
+```
+
+#### GET `/admin/users/stats/summary`
+Get user statistics summary.
+
+**Response:**
+```json
+{
+  "total_users": 150,
+  "users_by_status": {
+    "active": 120,
+    "admin": 5,
+    "banned": 10,
+    "inactive": 15
+  },
+  "timestamp": "2024-01-15T12:30:00Z"
+}
+```
+
+## Rate Limiting
+
+The API implements comprehensive rate limiting:
+
+- **Requests per minute (RPM)**: 60 for public users
+- **Requests per hour (RPH)**: 1800 for public users
+- **Bytes per minute**: 100MB limit
+- **Points system**: Different endpoints consume different points
+
+### Point Costs by Endpoint
+
+| Endpoint | Points | Description |
+|----------|--------|-------------|
+| `/schema`, `/resources` | 1 | Light endpoints |
+| `/last` | 1 | Light endpoints |
+| `/history` | 5 | Medium endpoints |
+| `/analysis`, `/volatility`, `/trend`, `/momentum` | 15 | Heavy endpoints |
+| `/admin/*` | 1 | Admin endpoints |
+| WebSocket subscribe | 10 + 2×topics | Base cost + per topic |
+
+### Rate Limit Headers
+
+Responses include rate limit information:
+
+```http
+X-RateLimit-Remaining: rpm=59;rph=1199;ppm=50
+X-RateLimit-Reset: 2024-01-01T12:01:00Z
+```
+
+## Error Responses
+
+All endpoints follow a consistent error response format:
+
+```json
+{
+  "success": false,
+  "error": {
+    "code": 400,
+    "message": "Detailed error description",
+    "type": "ValidationError"
+  }
+}
+```
+
+### Authentication Error Handling
+
+#### Rate Limiting
+Authentication attempts are rate-limited with exponential backoff:
+- **First failure**: No delay
+- **Subsequent failures**: Exponential backoff (50s, 300s, 1800s, etc.)
+- **Maximum delay**: 4 days (345,600 seconds)
+
+#### Common Error Responses
+
+**Challenge Expired:**
+```json
+{
+  "detail": "Invalid or expired authentication challenge"
+}
+```
+
+**Signature Verification Failed:**
+```json
+{
+  "detail": "Signature does not match address"
+}
+```
+
+**Rate Limited:**
+```json
+{
+  "detail": "Too many failed attempts. Try again in 300 seconds."
+}
+```
+
+**Authentication Method Disabled:**
+```json
+{
+  "detail": "EVM authentication not enabled"
+}
+```
+
+### WebSocket Errors
+
+```json
+{
+  "error": "No topics authorized",
+  "rejected": ["chomp:sys.protected_resource"],
+  "reason": "Protected resource requires authentication"
+}
+```
+
+### Rate Limit Errors
+
+```json
+{
+  "error": "Rate limit exceeded (ppm: 61/60)",
+  "retry_after": 60
+}
+```
+
+## Common HTTP Status Codes
+
+- `200`: Success
+- `204`: Success (No Content) - used for logout
+- `400`: Bad Request (invalid parameters)
+- `401`: Unauthorized (missing/invalid authentication)
+- `403`: Forbidden (insufficient permissions)
+- `404`: Not Found (resource doesn't exist)
+- `429`: Too Many Requests (rate limit exceeded)
+- `500`: Internal Server Error
+
+## Data Formats
+
+### Timestamps
+All timestamps use ISO 8601 format in UTC:
+```
+2024-01-15T12:30:00Z
+```
+
+### Pagination
+Pagination follows a consistent format:
+```json
+{
+  "limit": 100,
+  "offset": 0,
+  "total": 250,
+  "has_next": true
+}
+```
+
+### Resource Mapping
+
+Common resource name mappings for UpdateIngester endpoints:
+- `user`, `users` → `sys.users`
+- Custom resources use their exact table names
+
+## Examples
+
+### Basic Data Retrieval
+
+```bash
+# Get latest BTC prices from multiple exchanges
+curl "http://localhost:40004/last/BinanceFeeds.BTCUSDT,CoinbaseFeeds.BTCUSD"
+
+# Get hourly BTC price history for last 24 hours
+curl "http://localhost:40004/history/BinanceFeeds.BTCUSDT?interval=h1&from_date=2024-01-01T00:00:00Z"
+
+# Get technical analysis
+curl "http://localhost:40004/analysis/BinanceFeeds.BTCUSDT?periods=20,50,200"
+```
+
+### WebSocket Real-time Data
+
+```javascript
+const ws = new WebSocket('ws://localhost:40004/ws?token=your-jwt-token');
+
+ws.onopen = () => {
+  // Subscribe to multiple feeds
+  ws.send(JSON.stringify({
+    action: 'subscribe',
+    topics: ['chomp:BinanceFeeds.BTCUSDT', 'chomp:CoinbaseFeeds.BTCUSD']
+  }));
+};
+
+ws.onmessage = (event) => {
+  const data = JSON.parse(event.data);
+  console.log('Received:', data);
+};
+```
+
+### Authentication Examples
+
+```bash
+# Web3 authentication
+curl -X POST "http://localhost:40004/auth/challenge" \
+  -H "Content-Type: application/json" \
+  -d '{"auth_method":"evm","identifier":"0x1234..."}'
+
+# Direct authentication with static token
+curl -X POST "http://localhost:40004/auth/direct" \
+  -H "Content-Type: application/json" \
+  -d '{"auth_method":"static","credentials":{"token":"your-token"}}'
+```
+
+### Configuration Management
+
+```bash
+# Get current ingester configuration
+curl "http://localhost:40004/config/ingester" \
+  -H "Authorization: Bearer $TOKEN"
+
+# Update ingester configuration
+curl -X POST "http://localhost:40004/config/ingester/update" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"config_content":"your-yaml-config","restart_affected":true}'
+
+# Rollback configuration
+curl -X POST "http://localhost:40004/config/rollback" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"steps_back":1,"config_type":"ingester"}'
+```
+
+### Admin Operations
+
+```bash
+# Get ingester status
+curl "http://localhost:40004/admin/ingesters" \
+  -H "Authorization: Bearer $TOKEN"
+
+# Restart ingesters
+curl -X POST "http://localhost:40004/admin/ingesters/control" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"action":"restart","ingester_names":["BinanceFeeds"],"force":false}'
+```
+
+### Rate Limit Monitoring
+
+```bash
+# Check current limits
+curl "http://localhost:40004/limits" \
+  -H "Authorization: Bearer $TOKEN"
+
+# Monitor headers in responses
+curl -I "http://localhost:40004/last/BinanceFeeds.BTCUSDT"
+```

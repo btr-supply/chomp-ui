@@ -1,0 +1,437 @@
+---
+title: 'Server Testing Guide'
+description: 'Testing strategies for server APIs, authentication, and user flows'
+category: 'Server'
+order: 4
+---
+
+# Server Testing Guide
+
+## Overview
+
+Server testing in Chomp focuses on **API endpoints**, **authentication flows**, **complete user journeys**, and **server services** using real dependencies instead of mocks.
+
+<div className="bg-green-50 border-l-4 border-green-400 p-4 my-6">
+
+**Key Philosophy**: Test complete user flows with real authentication and API responses.
+
+</div>
+
+## Test Categories
+
+### API and Flow Tests
+
+<div className="grid grid-cols-1 md:grid-cols-2 gap-4 my-6">
+
+<div className="p-4 border rounded-lg">
+**Comprehensive API Testing**
+- `test_api_comprehensive.py` - Complete API endpoint validation
+- `test_api_flows.py` - API flow testing
+- `test_integration_flows.py` - Full system integration
+</div>
+
+<div className="p-4 border rounded-lg">
+**Authentication & User Flows**
+- `test_authentication_flows.py` - All authentication methods
+- `test_auth_flow.py` - Web3 authentication flows
+- `test_web3_auth_flows.py` - Blockchain authentication
+- `test_user_flows.py` - End-to-end user journeys
+</div>
+
+</div>
+
+### Server Services Tests
+
+<div className="grid grid-cols-1 md:grid-cols-2 gap-4 my-6">
+
+<div className="p-4 border rounded-lg">
+**Core Services**
+- `test_services_basic.py` - Basic service functionality
+- `test_services_limiter.py` - Rate limiting service
+- `test_services_loader.py` - Data loading service
+</div>
+
+<div className="p-4 border rounded-lg">
+**Advanced Services**
+- `test_services_status_checker.py` - Status monitoring
+- `test_services_converter.py` - Data conversion
+- `test_services_ts_analysis.py` - Time series analysis
+</div>
+
+</div>
+
+### Configuration and Protection
+- `test_server_config.py` - Server configuration validation
+- `test_protection.py` - Route and resource protection
+- `test_server_middlewares_init.py` - Middleware initialization
+
+### Additional Tests
+- `test_websocket.py` - WebSocket functionality
+- `test_main.py` - Main application testing
+
+## User Flows
+
+The following user flows validate the complete API functionality from public access through authenticated admin operations. These flows ensure proper security, rate limiting, and data access controls.
+
+### 1. Public (Unauthenticated) User Flows
+
+<div className="bg-blue-50 p-4 rounded-lg my-4">
+
+**Resource Discovery**
+- Query list of resources via `/resources` endpoint
+- Verify protected resources are excluded from results
+- Validate response structure and data integrity
+
+**Data Access**
+- Query last values and historical data
+- Test various date ranges and parameters
+- Verify data accuracy and format consistency
+
+**Protection Validation**
+- Attempt to access protected resources
+- Verify proper 403/404 responses
+- Confirm protected data is never exposed
+
+**Rate Limit Validation**
+- Monitor request counts and limits
+- Test rate limit enforcement
+- Validate proper error responses
+
+</div>
+
+### 2. Authenticated User Flows
+
+<div className="bg-green-50 p-4 rounded-lg my-4">
+
+**Authentication**
+- Test login with valid/invalid credentials
+- Verify JWT token generation and validation
+- Test session persistence and status checks
+
+**Protected Access**
+- Access admin endpoints and protected resources
+- Query system metrics and user data
+- Verify authentication-dependent access controls
+
+**User Management**
+- Test user tracking and statistics
+- Verify user status updates
+- Confirm proper data persistence
+
+</div>
+
+## Authentication Flow Testing
+
+### Web3 Authentication
+1. Create challenge with `/auth/challenge`
+2. Sign message with wallet
+3. Verify signature with `/auth/verify`
+4. Receive JWT token for authenticated requests
+
+### Static Token Authentication
+- Direct authentication with admin token
+- JWT token generation and session management
+
+### OAuth2 Social Authentication
+- GitHub and Twitter/X OAuth2 flows
+- Authorization URL generation and callback handling
+
+## Real Test Examples from Codebase
+
+### Comprehensive API Flow Testing
+```python
+class TestPublicUserFlows:
+    """Test suite for Flow 1: Public (unauthenticated) user flows"""
+
+    @pytest.mark.asyncio
+    async def test_1_1_resource_discovery_excludes_protected(self, mock_request, mock_server_config):
+        """Test 1.1 - Query list of resources, ensure protected are excluded"""
+
+        with patch('src.state.server_config', mock_server_config), \
+             patch('src.services.config.get_resources') as mock_get_resources:
+
+            # Mock mixed public/protected resources
+            mock_get_resources.return_value = ("", [
+                "public.data", "public.prices", "sys.monitor", "admin.users"
+            ])
+
+            response = await get_resources(mock_request)
+            resources = response.data["resources"]
+
+            # Verify protected resources (sys.*) are excluded
+            protected_resources = [r for r in resources if r.startswith("sys.")]
+            assert len(protected_resources) == 0
+```
+
+### Rate Limiting Service Testing
+```python
+class TestOptimizedRateLimiter:
+    """Test the new optimized RateLimiter class."""
+
+    @pytest.mark.asyncio
+    async def test_check_and_increment_whitelist(self):
+        """Test whitelist bypass functionality."""
+        whitelisted_user = User(uid="admin123", status="admin")
+
+        with patch('src.services.limiter.state', self.mock_state):
+            err, result = await RateLimiter.check_and_increment(
+                whitelisted_user, "/schema", 1000)
+
+            assert err == ""
+            assert result["bypass"]
+
+    @pytest.mark.asyncio
+    async def test_check_and_increment_rate_limited(self):
+        """Test rate limit exceeded scenario."""
+        # Mock Redis responses - user exceeds rpm limit
+        mock_pipeline.execute.side_effect = [
+            ["10", "90", "900", "900000"], # at limit
+            []
+        ]
+
+        err, result = await RateLimiter.check_and_increment(
+            self.test_user, "/schema", 1000)
+
+        assert "Rate limit exceeded" in err
+        assert result["limited"]
+        assert result["retry_after"] == 60  # rpm limit TTL
+```
+
+### Authentication Flow Testing
+```python
+class TestAuthenticatedUserFlows:
+    """Test suite for authenticated user flows"""
+
+    @pytest.mark.asyncio
+    async def test_2_2_successful_authentication_flow(self, mock_request, mock_server_config):
+        """Test successful authentication with valid token"""
+
+        with patch('src.state.server_config', mock_server_config):
+            # Test static token authentication
+            auth_data = {
+                "auth_method": "static",
+                "credentials": {"token": STATIC_AUTH_TOKEN}
+            }
+
+            response = await authenticate_direct(mock_request, auth_data)
+
+            assert isinstance(response, ApiResponse)
+            assert "access_token" in response.data
+            assert "expires_in" in response.data
+```
+
+## API Testing Examples
+
+### Base Configuration
+```bash
+export CHOMP_API_BASE="http://localhost:40004"
+export CHOMP_ADMIN_TOKEN="secrettoken"
+```
+
+### Authentication Testing
+```bash
+# Check available methods
+curl -X GET "$CHOMP_API_BASE/auth/methods"
+
+# Static token authentication
+curl -X POST "$CHOMP_API_BASE/auth/direct" \
+  -H "Content-Type: application/json" \
+  -d '{"auth_method": "static", "credentials": {"token": "'$CHOMP_ADMIN_TOKEN'"}}'
+```
+
+### Data Endpoint Testing
+```bash
+# Public endpoints
+curl -X GET "$CHOMP_API_BASE/info"
+curl -X GET "$CHOMP_API_BASE/schema"
+curl -X GET "$CHOMP_API_BASE/resources"
+curl -X GET "$CHOMP_API_BASE/last"
+
+# Historical data
+curl -X GET "$CHOMP_API_BASE/history?resource=btc_usd&limit=100"
+```
+
+### Admin Endpoint Testing
+```bash
+# With JWT authentication
+curl -X GET "$CHOMP_API_BASE/admin/users?limit=50" \
+  -H "Authorization: Bearer $JWT_TOKEN"
+```
+
+## Running Server Tests
+
+### Primary Method
+```bash
+# Run all server tests via Makefile
+make test
+
+# Run specific server test categories
+pytest tests/test_api_*.py
+pytest tests/test_auth*.py
+pytest tests/test_services_*.py
+pytest tests/test_*flows.py
+```
+
+### Individual Test Files
+```bash
+# API testing
+pytest tests/test_api_comprehensive.py -v
+pytest tests/test_api_flows.py -v
+
+# Authentication testing
+pytest tests/test_authentication_flows.py -v
+pytest tests/test_web3_auth_flows.py -v
+
+# Services testing
+pytest tests/test_services_limiter.py -v
+pytest tests/test_services_loader.py -v
+
+# Protection and config
+pytest tests/test_protection.py -v
+pytest tests/test_server_config.py -v
+```
+
+### Expected Output Examples
+```
+tests/test_api_comprehensive.py ............. PASSED
+tests/test_authentication_flows.py .......... PASSED
+tests/test_services_limiter.py .............. PASSED
+tests/test_user_flows.py .................... PASSED
+tests/test_protection.py .................... PASSED
+```
+
+## Flow Validation Matrix
+
+| Endpoint Category | Public Access | Protected Access | Rate Limited | Data Filtered |
+|-------------------|---------------|------------------|--------------|---------------|
+| `/schema` | ✅ | ✅ Enhanced | ✅ | ✅ |
+| `/resources` | ✅ | ✅ Enhanced | ✅ | ✅ |
+| `/last` | ✅ | ✅ Enhanced | ✅ | ✅ |
+| `/history` | ✅ | ✅ Enhanced | ✅ | ✅ |
+| `/analysis/*` | ✅ | ✅ Enhanced | ✅ | ✅ |
+| `/admin/*` | ❌ | ✅ Only | ✅ | N/A |
+| `sys.*` resources | ❌ | ✅ Only | ✅ | N/A |
+
+## Writing Server Tests
+
+### Authentication Test Pattern
+```python
+def test_auth_flow(self):
+    # Test challenge creation
+    challenge_response = client.post("/auth/challenge", json={
+        "address": "0x123...",
+        "method": "web3"
+    })
+
+    # Test signature verification
+    verify_response = client.post("/auth/verify", json={
+        "signature": "0x456...",
+        "message": challenge_response.json()["message"]
+    })
+
+    # Test authenticated access
+    token = verify_response.json()["access_token"]
+    admin_response = client.get("/admin/status", headers={
+        "Authorization": f"Bearer {token}"
+    })
+
+    assert admin_response.status_code == 200
+```
+
+### API Endpoint Test Pattern
+```python
+def test_public_endpoint(self):
+    response = client.get("/resources")
+    assert response.status_code == 200
+
+    data = response.json()
+    assert "resources" in data
+
+    # Verify protected resources are filtered
+    protected_resources = [r for r in data["resources"] if r.startswith("sys.")]
+    assert len(protected_resources) == 0
+```
+
+### Service Testing Pattern
+```python
+@pytest.mark.asyncio
+async def test_service_functionality(self):
+    """Test server service with real dependencies."""
+    service = ServiceClass()
+
+    # Test service operation
+    result = await service.perform_operation()
+
+    assert result is not None
+    assert result.status == "success"
+```
+
+### Configuration Testing Pattern
+```python
+def test_server_config_validation(self):
+    """Test server configuration validation."""
+    config = ServerConfig(
+        static_auth_token="test_token",
+        protected_routes=["/admin/*"],
+        protected_resources=["sys.*"]
+    )
+
+    assert config.static_auth_token == "test_token"
+    assert "/admin/*" in config.protected_routes
+    assert "sys.*" in config.protected_resources
+```
+
+## Performance Testing
+
+### API Response Time Testing
+```python
+@pytest.mark.asyncio
+async def test_api_response_time(self):
+    """Test API response time under load."""
+    import time
+
+    start_time = time.time()
+    response = await client.get("/resources")
+    elapsed = time.time() - start_time
+
+    assert response.status_code == 200
+    assert elapsed < 1.0  # Should respond in under 1 second
+```
+
+### Rate Limiter Performance Testing
+```python
+@pytest.mark.asyncio
+async def test_rate_limiter_performance(self):
+    """Test rate limiter performance with concurrent requests."""
+    import asyncio
+
+    async def make_request():
+        return await RateLimiter.check_and_increment(user, "/test", 1000)
+
+    # Test 100 concurrent requests
+    tasks = [make_request() for _ in range(100)]
+    results = await asyncio.gather(*tasks)
+
+    # All should complete successfully
+    assert len(results) == 100
+```
+
+## Key Benefits
+
+<div className="grid grid-cols-1 md:grid-cols-2 gap-6 my-6">
+
+<div className="p-4 border rounded-lg">
+**Comprehensive Coverage**
+- Complete API endpoint validation
+- Real authentication flow testing
+- Service integration testing
+</div>
+
+<div className="p-4 border rounded-lg">
+**Real-world Scenarios**
+- User journey validation
+- Rate limiting verification
+- Protection enforcement testing
+</div>
+
+</div>

@@ -1,0 +1,78 @@
+# Node modules
+node_modules/
+.bun/
+
+# Build output
+.next/
+out/
+dist/
+build/
+.cache/
+.next-tmp/
+.next-static/
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+bun-debug.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Env files
+.env
+.env.*
+!.env.example
+
+# Editor directories and files
+.idea/
+.vscode/
+.cursor/
+.cursorrules
+.claude/
+*.sublime-workspace
+*.sublime-project
+
+# Test coverage
+coverage/
+.nyc_output/
+
+# Misc
+*.log
+*.tgz
+*.swp
+*.bak
+
+# Bun lockfile (if you want to ignore it, otherwise remove this line)
+bun.lockb
+
+# Local runtime data
+.pnpm-debug.log
+npm-debug.log
+bun-debug.log
+
+# Next.js export
+exported/
+
+# Storybook
+.storybook-out/
+out-storybook/
+
+# Mac system files
+.AppleDouble
+.LSOverride
+
+# Windows system files
+ehthumbs.db
+Desktop.ini
+
+# Optional: Ignore local dev scripts or temp files
+*.local
+*.tmp
+*~
+*.tsbuildinfo
+*.lock

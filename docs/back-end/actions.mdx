@@ -1,0 +1,313 @@
+---
+title: 'Actions'
+description: "Core actions that orchestrate Chomp's data ingestion ETL pipeline"
+category: 'Core Architecture'
+order: 4
+---
+
+# Actions
+
+Core actions that orchestrate Chomp's data ingestion ETL (Extract, Transform, Load) pipeline. Actions represent distinct phases in data processing workflow and work together to ingest, process, and store data from various sources.
+
+## Overview
+
+Actions form the backbone of Chomp's data processing pipeline. Each action handles a specific phase of the ETL process:
+
+<div className="flex items-center justify-center space-x-4 my-6 p-4 bg-gray-50 rounded-lg">
+
+<div className="text-center">
+  <div className="w-12 h-12 bg-blue-500 text-white rounded-full flex items-center justify-center font-bold">
+    1
+  </div>
+  <div className="mt-2 text-sm font-semibold">Schedule</div>
+</div>
+
+<div className="text-gray-400 text-2xl">→</div>
+
+<div className="text-center">
+  <div className="w-12 h-12 bg-green-500 text-white rounded-full flex items-center justify-center font-bold">
+    2
+  </div>
+  <div className="mt-2 text-sm font-semibold">Load</div>
+</div>
+
+<div className="text-gray-400 text-2xl">→</div>
+
+<div className="text-center">
+  <div className="w-12 h-12 bg-yellow-500 text-white rounded-full flex items-center justify-center font-bold">
+    3
+  </div>
+  <div className="mt-2 text-sm font-semibold">Transform</div>
+</div>
+
+<div className="text-gray-400 text-2xl">→</div>
+
+<div className="text-center">
+  <div className="w-12 h-12 bg-purple-500 text-white rounded-full flex items-center justify-center font-bold">
+    4
+  </div>
+  <div className="mt-2 text-sm font-semibold">Store</div>
+</div>
+
+</div>
+
+## Available Actions
+
+### Schedule (`src/actions/schedule.py`)
+
+<div className="border-l-4 border-blue-500 p-4 my-4 bg-blue-50">
+
+**Purpose**: Orchestrates execution timing and coordination of ingester jobs across clustered instances using cron-based scheduling
+
+**Key Functions**:
+
+- `schedule(ing)` - Main scheduling entry point for individual ingesters
+- `get_scheduler(ingester_type)` - Returns appropriate scheduler for ingester type
+- `Scheduler.add_ingester()` - Add single ingester to scheduling queue
+- `Scheduler.add_ingesters()` - Add multiple ingesters with interval batching
+- `Scheduler.start()` - Start all scheduled cron jobs
+
+**Features**:
+
+<div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-2">
+
+<div>
+- **Cron Expression Conversion**: Automatically converts interval notation (`h1`, `m5`, etc.) to cron expressions
+- **Distributed Coordination**: Redis-based task claiming prevents duplicate execution across instances
+</div>
+
+<div>
+- **Ingester Type Registry**: Dynamic scheduler registration for different ingester types (HTTP API, WebSocket, EVM, etc.)
+- **Async/Threaded Execution**: Supports both async and threaded job execution modes
+</div>
+
+</div>
+
+**Supported Ingester Types**:
+- `http_api`, `ws_api`, `processor`
+- Optional: `evm_caller`, `evm_logger`, `svm_caller`, `sui_caller`, `static_scrapper`
+
+</div>
+
+### Load (`src/actions/load.py`)
+
+<div className="border-l-4 border-green-500 p-4 my-4 bg-green-50">
+
+**Purpose**: Handles data extraction from configured sources with support for different ingester types and query patterns
+
+**Key Functions**:
+
+- `load(ing, from_date, to_date, aggregation_interval, uids)` - Main data loading function with flexible parameters
+- `load_batch(ing, uids)` - Efficient bulk loading for UpdateIngesters by UIDs
+- `load_all(ing, limit, offset)` - Paginated loading for UpdateIngesters
+- `load_last(ing)` - Load latest record for UpdateIngester by UID
+
+**Features**:
+
+<div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-2">
+
+<div>
+- **Multi-Type Support**: Handles `Ingester`, `UpdateIngester`, and `TimeSeriesIngester` types
+- **Caching Integration**: Checks Redis cache before database queries for performance
+</div>
+
+<div>
+- **Flexible Querying**: Supports single record, bulk, and time-range queries
+- **Error Handling**: Comprehensive error handling with fallback mechanisms
+</div>
+
+</div>
+
+**Data Flow**:
+1. Check ingester type and determine loading strategy
+2. For UpdateIngesters: Use UID-based or bulk loading
+3. For TimeSeriesIngesters: Use time-range queries with caching
+4. Return structured data converted to appropriate format
+
+</div>
+
+### Transform (`src/actions/transform.py`)
+
+<div className="border-l-4 border-yellow-500 p-4 my-4 bg-yellow-50">
+
+**Purpose**: Converts raw data into structured, validated formats using a powerful transformation chain system
+
+**Key Functions**:
+
+- `transform_all(ing)` - Transform all fields for an ingester
+- `transform(ing, field)` - Transform individual field through transformer chain
+- `apply_transformer(ing, field, transformer)` - Apply single transformer with expression evaluation
+- `process_cached_references(ing, transformer)` - Resolve cross-ingester field references
+
+**Built-in Transformers**:
+
+<div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-2">
+
+<div>
+**Text Processing**
+- `lower`, `upper`, `capitalize`
+- `strip`, `slugify`, `to_snake`
+- `remove_punctuation`
+</div>
+
+<div>
+**Type Conversion**
+- `int`, `float`, `str`, `bool`
+- `to_json`, `bin`, `hex`
+- `round`, `round2`, `round4`, etc.
+</div>
+
+<div>
+**Specialized**
+- `shorten_address` (EVM addresses)
+- `sha256digest`, `md5digest`
+- Time series functions via `::` syntax
+</div>
+
+</div>
+
+**Advanced Features**:
+
+<div className="space-y-2 mt-2">
+
+- **Cross-Ingester References**: Access cached data from other ingesters using `{AVAX.idx}` syntax
+- **Series Transformers**: Statistical operations on time series data (`{self::mean(1h)}`)
+- **Expression Evaluation**: Mathematical expressions with field substitution (`{price} * {quantity}`)
+- **Safe Evaluation**: Secure expression parsing prevents code injection
+
+</div>
+
+**Series Transformers**: `median`, `mean`, `std`, `var`, `min`, `max`, `sum`, `cumsum`, `prod`
+
+</div>
+
+### Store (`src/actions/store.py`)
+
+<div className="border-l-4 border-purple-500 p-4 my-4 bg-purple-50">
+
+**Purpose**: Persists transformed data to database backends with caching, publishing, and monitoring
+
+**Key Functions**:
+
+- `store(ing, table, publish, jsonify, monitor)` - Main storage function with flexible options
+- `store_batch(ing, values, from_date, to_date, aggregation_interval)` - Batch insertion for time series data
+- `transform_and_store(ing, table, publish, jsonify, monitor)` - Combined transform and store operation
+
+**Features**:
+
+<div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-2">
+
+<div>
+- **Multi-Backend Support**: Automatic adapter selection based on ingester type
+- **Redis Integration**: Caching and pub/sub notification system
+</div>
+
+<div>
+- **Monitoring Data**: Automatic collection and storage of ingester performance metrics
+- **Timestamp Management**: Automatic timestamp updating and floor alignment
+</div>
+
+</div>
+
+**Storage Strategies**:
+
+<div className="space-y-2 mt-2">
+
+- **UpdateIngester**: Uses `upsert` operations with UID-based conflict resolution
+- **TimeSeriesIngester**: Uses `insert` operations with timestamp-based organization
+- **Monitor Data**: Separate storage of performance and health metrics
+
+</div>
+
+**Pub/Sub Integration**: Publishes ingested data to Redis channels for real-time streaming to WebSocket clients
+
+</div>
+
+## Action Orchestration
+
+### Typical Workflow
+
+<div className="bg-blue-50 p-4 rounded-lg my-4">
+
+```python
+# Complete ingester processing workflow
+async def process_ingester(ingester):
+    # 1. Schedule - Check if it's time to run
+    tasks = await schedule(ingester)
+
+    # 2. Load - Extract data from source
+    data = await load(ingester, from_date, to_date)
+    if not data:
+        return None
+
+    # 3. Transform - Process and validate data
+    transformed_count = await transform_all(ingester)
+    if transformed_count == 0:
+        return None
+
+    # 4. Store - Persist to database with caching and monitoring
+    result = await store(ingester, publish=True, monitor=True)
+
+    return result
+```
+
+</div>
+
+### Combined Operations
+
+<div className="bg-green-50 p-4 rounded-lg my-4">
+
+**`transform_and_store()`** - Optimized function that:
+1. Calls `transform_all()` to process all fields
+2. Updates `last_ingested` timestamp with interval flooring
+3. Calls `store()` with configured options
+4. Skips storage if no new values were transformed
+
+</div>
+
+## Configuration & Error Handling
+
+### Error Resilience
+
+<div className="space-y-2 my-4">
+
+- **Graceful Degradation**: Transformer failures set field values to `None` instead of crashing
+- **Timeout Handling**: Async timeout protection for long-running transformations
+- **Validation**: Safe evaluation prevents malicious code execution in transformers
+- **Logging**: Comprehensive error logging with context information
+
+</div>
+
+### Performance Optimizations
+
+<div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+
+<div>
+
+**Caching Strategy**
+- Module-level cache for cross-ingester references
+- Redis caching with automatic expiry
+- Batch operations for bulk data loading
+
+</div>
+
+<div>
+
+**Async Operations**
+- Concurrent field transformation
+- Threaded and async scheduler support
+- Pipeline operations for database writes
+
+</div>
+
+</div>
+
+## Integration Points
+
+Actions integrate tightly with other Chomp components:
+
+- **Ingesters**: Each ingester type has a dedicated scheduler function
+- **Cache**: Redis-based caching and pub/sub for real-time data
+- **Database**: Adapter-based storage supporting multiple backends
+- **Monitoring**: Automatic collection of performance metrics
+- **State Management**: Global state coordination across cluster instances

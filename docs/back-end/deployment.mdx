@@ -1,0 +1,507 @@
+---
+title: 'Deployment Guide'
+description: 'Installation, configuration, and production setup for Chomp'
+category: 'Setup & Operations'
+order: 9
+---
+
+# Chomp Deployment Guide
+
+Chomp is a lightweight, multimodal data ingester supporting multiple deployment methods and environments.
+
+<div className="bg-blue-50 border-l-4 border-blue-400 p-4 my-4">
+
+**Note**: For configuration details (environment variables, YAML schemas, etc.), see [Configuration Guide](./configuration).
+
+</div>
+
+## Quick Start
+
+<div className="bg-gray-50 p-4 rounded-lg my-4">
+
+```bash
+# Clone and deploy (full setup)
+git clone https://github.com/btr-supply/chomp.git
+cd chomp
+sudo make full-setup
+
+# Or step-by-step
+sudo make db-setup    # Start databases
+make run              # Start ingester + API
+```
+
+</div>
+
+## Prerequisites
+
+<div className="grid grid-cols-1 md:grid-cols-2 gap-4 my-4">
+
+<div className="p-4 border rounded-lg">
+
+**System Requirements**
+
+- **OS**: Linux (Ubuntu 20.04+), macOS, Windows (WSL2)
+- **Memory**: 1GB+ (4GB+ for production)
+- **Python**: 3.12+, Docker 21.0+
+
+</div>
+
+<div className="p-4 border rounded-lg">
+
+**Network Requirements**
+
+- **Ports**: 40001-40004 available
+- **Internet**: Required for data sources
+- **Docker**: Network access for container operations
+
+</div>
+
+</div>
+
+## Deployment Methods
+
+### 1. Containerized (Recommended)
+
+<div className="border-l-4 border-green-500 p-4 my-4 bg-green-50">
+
+**Full Setup:**
+
+```bash
+sudo make full-setup  # Complete environment
+```
+
+**Step-by-step:**
+
+```bash
+sudo make db-setup    # TDengine + Redis
+make run [MODE] [DEPLOYMENT] [API]
+```
+
+**Arguments**:
+
+- `MODE`: `dev` (default) | `prod`
+- `DEPLOYMENT`: `docker` (default) | `local`
+- `API`: `api` (default) | `noapi`
+
+</div>
+
+### 2. Local Development
+
+<div className="border-l-4 border-blue-500 p-4 my-4 bg-blue-50">
+
+```bash
+make install          # Install dependencies
+sudo make db-setup    # Containerized databases
+make run dev local    # Local Python execution
+```
+
+</div>
+
+### 3. Hybrid (Local + Docker DBs)
+
+<div className="border-l-4 border-yellow-500 p-4 my-4 bg-yellow-50">
+
+```bash
+sudo make db-setup    # Docker databases
+make run dev local    # Local application
+```
+
+</div>
+
+## Configuration Files
+
+### Required Environment Variables
+
+<div className="bg-gray-50 p-4 rounded-lg my-4">
+
+```env
+INGESTER_CONFIGS=ingesters/your-config.yml
+SERVER_CONFIG=./server-config.dev.yml
+```
+
+</div>
+
+### Configuration Structure
+
+<div className="bg-gray-50 p-4 rounded-lg my-4">
+
+```
+project-root/
+├── .env.dev                 # Development environment
+├── .env.prod                # Production environment
+├── chomp/
+│   ├── server-config.*.yml  # API server configs
+│   └── scripts/
+└── ingesters/               # Ingester definitions
+    ├── your-config.yml
+    └── svm_callers/
+        └── solana.yml
+```
+
+</div>
+
+<div className="bg-blue-50 border-l-4 border-blue-400 p-4 my-4">
+
+**Details**: See [Configuration Guide](./configuration) for complete schema and examples.
+
+</div>
+
+## Understanding Resource vs Field Scaling
+
+<div className="bg-red-50 border-l-4 border-red-400 p-4 my-4">
+
+**Critical**: Chomp scales based on **resources** (jobs), not **fields** (data points):
+
+```yaml
+# 1 RESOURCE with 3 FIELDS = 1 job
+svm_caller:
+  - name: TokenPrices # ← 1 RESOURCE
+    fields:
+      - name: BTC # ← Field 1
+      - name: ETH # ← Field 2
+      - name: SOL # ← Field 3
+```
+
+**Scaling Formula**: `instances = ⌈resources / MAX_JOBS⌉`
+
+**Example**: 35 resources ÷ 6 MAX_JOBS = 6 instances
+
+</div>
+
+## Operations
+
+### Monitoring
+
+<div className="grid grid-cols-1 md:grid-cols-3 gap-4 my-4">
+
+<div className="p-3 text-center border rounded">
+
+**Container Status**
+
+```bash
+make monitor
+```
+
+</div>
+
+<div className="p-3 text-center border rounded">
+
+**View Logs**
+
+```bash
+make logs [container]
+```
+
+</div>
+
+<div className="p-3 text-center border rounded">
+
+**Specific Container**
+
+```bash
+docker logs chomp-api
+```
+
+</div>
+
+</div>
+
+### Health Checks
+
+<div className="grid grid-cols-1 md:grid-cols-2 gap-4 my-4">
+
+<div className="p-4 bg-gray-50 rounded">
+
+**Database Connectivity**
+
+```bash
+make ping
+```
+
+</div>
+
+<div className="p-4 bg-gray-50 rounded">
+
+**API Health**
+
+```bash
+curl http://localhost:40004/health
+```
+
+</div>
+
+</div>
+
+### Management
+
+<div className="grid grid-cols-1 md:grid-cols-3 gap-4 my-4">
+
+<div className="p-3 text-center border rounded">
+
+**Stop Services**
+
+```bash
+make stop
+```
+
+</div>
+
+<div className="p-3 text-center border rounded">
+
+**Clean Up**
+
+```bash
+make cleanup
+```
+
+</div>
+
+<div className="p-3 text-center border rounded">
+
+**Full Restart**
+
+```bash
+make restart
+```
+
+</div>
+
+</div>
+
+## Production Considerations
+
+### Security
+
+<div className="space-y-4 my-4">
+
+<div className="flex items-start space-x-4 p-3 bg-red-50 rounded">
+  <div className="w-8 h-8 bg-red-500 text-white rounded-full flex items-center justify-center text-sm font-bold">
+    1
+  </div>
+  <div>
+    <h4 className="font-semibold">Change Default Passwords</h4>
+    <div className="mt-2 bg-gray-800 text-green-400 p-2 rounded text-sm">
+      <code>
+        DB_ROOT_PASS=your_secure_password
+        <br />
+        DB_RW_PASS=your_secure_rw_password
+      </code>
+    </div>
+  </div>
+</div>
+
+<div className="flex items-start space-x-4 p-3 bg-yellow-50 rounded">
+  <div className="w-8 h-8 bg-yellow-500 text-white rounded-full flex items-center justify-center text-sm font-bold">
+    2
+  </div>
+  <div>
+    <h4 className="font-semibold">Network Isolation</h4>
+    <p className="text-sm text-gray-600">Use Docker networks/VPNs for secure communication</p>
+  </div>
+</div>
+
+<div className="flex items-start space-x-4 p-3 bg-blue-50 rounded">
+  <div className="w-8 h-8 bg-blue-500 text-white rounded-full flex items-center justify-center text-sm font-bold">
+    3
+  </div>
+  <div>
+    <h4 className="font-semibold">Firewall Configuration</h4>
+    <p className="text-sm text-gray-600">Restrict database port access</p>
+  </div>
+</div>
+
+<div className="flex items-start space-x-4 p-3 bg-green-50 rounded">
+  <div className="w-8 h-8 bg-green-500 text-white rounded-full flex items-center justify-center text-sm font-bold">
+    4
+  </div>
+  <div>
+    <h4 className="font-semibold">TLS Configuration</h4>
+    <p className="text-sm text-gray-600">Configure HTTPS for production APIs</p>
+  </div>
+</div>
+
+</div>
+
+### Performance Tuning
+
+<div className="grid grid-cols-1 md:grid-cols-3 gap-4 my-4">
+
+<div className="p-4 border rounded-lg">
+
+**Application**
+
+- Set `MAX_JOBS` based on CPU cores
+- Tune retry settings for reliability
+- Configure rate limits
+
+</div>
+
+<div className="p-4 border rounded-lg">
+
+**TDengine**
+
+- Adjust cache settings
+- Configure compression levels
+- Set retention policies
+
+</div>
+
+<div className="p-4 border rounded-lg">
+
+**Redis**
+
+- Configure memory limits
+- Adjust persistence settings
+- Optimize connection pooling
+
+</div>
+
+</div>
+
+### Storage Management
+
+<div className="space-y-2 my-4">
+
+- **Retention**: Configure TDengine retention policies
+- **Logs**: Set up log rotation
+- **Backups**: Implement regular backup strategy
+
+</div>
+
+## Troubleshooting
+
+### Common Issues
+
+<div className="space-y-4 my-4">
+
+<div className="p-4 border-l-4 border-red-500 bg-red-50">
+
+**Port Conflicts**
+Ensure ports 40001-40004 are available
+
+</div>
+
+<div className="p-4 border-l-4 border-yellow-500 bg-yellow-50">
+
+**Permission Issues**
+Use `sudo` for Docker commands
+
+</div>
+
+<div className="p-4 border-l-4 border-blue-500 bg-blue-50">
+
+**Memory Limits**
+Increase Docker memory limits for heavy workloads
+
+</div>
+
+<div className="p-4 border-l-4 border-green-500 bg-green-50">
+
+**Network Configuration**
+Check Docker network settings and connectivity
+
+</div>
+
+</div>
+
+### Debug Mode
+
+<div className="grid grid-cols-1 md:grid-cols-2 gap-4 my-4">
+
+<div className="p-4 bg-gray-50 rounded">
+
+**Local Debug**
+
+```bash
+make debug dev local
+```
+
+</div>
+
+<div className="p-4 bg-gray-50 rounded">
+
+**Docker Debug**
+
+```bash
+make debug dev docker
+```
+
+</div>
+
+<div className="p-4 bg-gray-50 rounded">
+
+**Manual Verbose**
+
+```bash
+VERBOSE=true make run
+```
+
+</div>
+
+</div>
+
+### Logs
+
+<div className="grid grid-cols-1 md:grid-cols-3 gap-4 my-4">
+
+<div className="p-3 text-center border rounded">
+
+**Application Logs**
+
+```bash
+tail -f chomp/out.log
+```
+
+</div>
+
+<div className="p-3 text-center border rounded">
+
+**Container Logs**
+
+```bash
+docker logs chomp-api
+```
+
+</div>
+
+<div className="p-3 text-center border rounded">
+
+**Database Logs**
+
+```bash
+docker logs chomp-db
+```
+
+</div>
+
+</div>
+
+## Environment Examples
+
+### Development
+
+<div className="bg-gray-50 p-4 rounded-lg my-4">
+
+```env
+MODE=dev
+VERBOSE=true
+MAX_JOBS=2
+RETRY_COOLDOWN=1
+```
+
+</div>
+
+### Production
+
+<div className="bg-gray-50 p-4 rounded-lg my-4">
+
+```env
+MODE=prod
+VERBOSE=false
+MAX_JOBS=10
+RETRY_COOLDOWN=5
+DB_ROOT_PASS=secure_password_here
+DB_RW_PASS=secure_rw_password_here
+```
+
+</div>

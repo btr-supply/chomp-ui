@@ -1,0 +1,491 @@
+---
+title: 'Architecture'
+description: 'System design, components, and extension points for the Chomp data ingestion framework'
+category: 'Core Architecture'
+order: 2
+---
+
+# Chomp Architecture
+
+## Overview
+
+Chomp is a lightweight, multimodal data ingester for Web2 and Web3 sources. It follows a modular, event-driven architecture supporting clustered deployments and real-time data streaming.
+
+## Core Components
+
+### System Architecture
+
+<div className="my-6 p-4 bg-gray-50 rounded-lg overflow-x-auto">
+
+```
+┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
+│    Ingesters    │    │     Server      │    │   Data Layer    │
+│                 │    │                 │    │                 │
+│ • HTTP API      │◄──►│ • FastAPI       │◄──►│ • TDengine      │
+│ • WebSocket     │    │ • WebSocket     │    │ • Redis Cache   │
+│ • Web Scraper   │    │ • Rate Limiter  │    │ • Adapters      │
+│ • EVM Caller    │    │ • Middleware    │    │                 │
+│ • EVM Logger    │    │                 │    │                 │
+│ • Processors    │    │                 │    │                 │
+└─────────────────┘    └─────────────────┘    └─────────────────┘
+```
+
+</div>
+
+### Data Flow
+
+<div className="grid grid-cols-1 lg:grid-cols-3 gap-4 my-6">
+
+<div className="p-4 border rounded-lg">
+
+**1. Configuration**
+YAML-based ingester definitions (`ingester-config-schema.yml`) and API server admin (`server-config-schema`)
+
+</div>
+
+<div className="p-4 border rounded-lg">
+
+**2. Scheduling**
+Cron-based job scheduling with Redis coordination (`schedule.py`)
+
+</div>
+
+<div className="p-4 border rounded-lg">
+
+**3. Ingestion**
+Multi-protocol data retrieval (`src/ingesters/`)
+
+</div>
+
+<div className="p-4 border rounded-lg">
+
+**4. Transformation**
+Field-level data processing (`transform.py`)
+
+</div>
+
+<div className="p-4 border rounded-lg">
+
+**5. Storage**
+Time-series database persistence (`src/adapters/`)
+
+</div>
+
+<div className="p-4 border rounded-lg">
+
+**6. API**
+Real-time HTTP/WebSocket data access (`src/server/`)
+
+</div>
+
+</div>
+
+## Key Design Patterns
+
+### 1. Resource-Field Model
+
+<div className="bg-blue-50 p-4 rounded-lg my-4">
+
+- **Resources**: Data sources or collections (`model.py:Resource`)
+- **Fields**: Individual data points within resources (`model.py:ResourceField`)
+- **Ingesters**: Combine resources with collection strategies (`model.py:Ingester`)
+
+</div>
+
+### 2. Modular Ingester Types
+
+Each type specializes in specific data sources:
+
+<div className="grid grid-cols-1 md:grid-cols-2 gap-4 my-4">
+
+<div className="space-y-2">
+
+- **scrapper**: Static/dynamic web scraping
+- **http_api**: REST API polling
+- **ws_api**: WebSocket streaming
+
+</div>
+
+<div className="space-y-2">
+
+- **evm_caller**: Smart contract view calls
+- **evm_logger**: Event log monitoring
+- **processor**: Post-processing of ingested data
+
+</div>
+
+</div>
+
+### 3. Proxy Pattern
+
+Core services use thread-safe proxies (`proxies.py`):
+
+<div className="grid grid-cols-1 md:grid-cols-2 gap-4 my-4">
+
+<div className="p-3 bg-gray-50 rounded">
+
+**`TsdbProxy`**
+Database connection pooling
+
+</div>
+
+<div className="p-3 bg-gray-50 rounded">
+
+**`RedisProxy`**
+Cache and pubsub management
+
+</div>
+
+<div className="p-3 bg-gray-50 rounded">
+
+**`Web3Proxy`**
+EVM RPC connection handling
+
+</div>
+
+<div className="p-3 bg-gray-50 rounded">
+
+**`ConfigProxy`**
+Configuration management
+
+</div>
+
+</div>
+
+### 4. Plugin Architecture
+
+Adapters provide pluggable database backends (`src/adapters/`):
+
+<div className="space-y-2 my-4">
+
+- **Primary**: TDengine (columnar, time-series optimized)
+- **Available**: TimescaleDB, InfluxDB, MongoDB, ClickHouse
+- **Interface**: Abstract `Tsdb` base class (`model.py:Tsdb`)
+
+</div>
+
+## Clustering & Synchronization
+
+### Job Distribution
+
+<div className="grid grid-cols-1 md:grid-cols-2 gap-4 my-4">
+
+<div className="p-4 border-l-4 border-blue-500">
+
+**Task Claiming**
+Redis-based distributed locking (`cache.py:ensure_claim_task`)
+
+</div>
+
+<div className="p-4 border-l-4 border-green-500">
+
+**Load Balancing**
+Automatic job distribution across instances
+
+</div>
+
+<div className="p-4 border-l-4 border-yellow-500">
+
+**Failover**
+Unclaimed tasks picked up by available workers
+
+</div>
+
+<div className="p-4 border-l-4 border-purple-500">
+
+**State Sync**
+Shared configuration and execution state
+
+</div>
+
+</div>
+
+## Data Transformation Pipeline
+
+### Processing Stages
+
+<div className="space-y-4 my-6">
+
+<div className="flex items-center space-x-4 p-3 bg-gray-50 rounded">
+  <div className="w-8 h-8 bg-blue-500 text-white rounded-full flex items-center justify-center text-sm font-bold">
+    1
+  </div>
+  <div>
+    <h4 className="font-semibold">Raw Data Extraction</h4>
+    <p className="text-sm text-gray-600">Protocol-specific adapters</p>
+  </div>
+</div>
+
+<div className="flex items-center space-x-4 p-3 bg-gray-50 rounded">
+  <div className="w-8 h-8 bg-blue-500 text-white rounded-full flex items-center justify-center text-sm font-bold">
+    2
+  </div>
+  <div>
+    <h4 className="font-semibold">Field Processing</h4>
+    <p className="text-sm text-gray-600">Type conversion and validation</p>
+  </div>
+</div>
+
+<div className="flex items-center space-x-4 p-3 bg-gray-50 rounded">
+  <div className="w-8 h-8 bg-blue-500 text-white rounded-full flex items-center justify-center text-sm font-bold">
+    3
+  </div>
+  <div>
+    <h4 className="font-semibold">Transformation Engine</h4>
+    <p className="text-sm text-gray-600">
+      Mathematical expressions, built-in functions, custom code
+    </p>
+  </div>
+</div>
+
+<div className="flex items-center space-x-4 p-3 bg-gray-50 rounded">
+  <div className="w-8 h-8 bg-blue-500 text-white rounded-full flex items-center justify-center text-sm font-bold">
+    4
+  </div>
+  <div>
+    <h4 className="font-semibold">Storage Optimization</h4>
+    <p className="text-sm text-gray-600">Batch insertions, columnar storage</p>
+  </div>
+</div>
+
+</div>
+
+### Transformation Features
+
+<div className="grid grid-cols-1 md:grid-cols-2 gap-4 my-4">
+
+<div>
+
+- Cross-field dependency resolution (`transform.py`)
+- Mathematical expressions with field references
+
+</div>
+
+<div>
+
+- Built-in functions (round, abs, mean, etc.)
+- Custom Python lambda functions
+
+</div>
+
+</div>
+
+## Server Architecture
+
+### FastAPI Application (`src/server/`)
+
+<div className="space-y-2 my-4">
+
+- Multi-version API support (`/`, `/v1`, `/v1.1`)
+- Automatic endpoint generation based on ingesters
+- WebSocket real-time streaming (`forwarder.py`)
+
+</div>
+
+### Middleware Stack (`middlewares/`)
+
+<div className="space-y-4 my-4">
+
+<div className="flex items-center space-x-4 p-3 border rounded">
+  <div className="w-8 h-8 bg-green-500 text-white rounded-full flex items-center justify-center text-sm font-bold">
+    1
+  </div>
+  <div>
+    <h4 className="font-semibold">CORS</h4>
+    <p className="text-sm text-gray-600">Domain-based access control</p>
+  </div>
+</div>
+
+<div className="flex items-center space-x-4 p-3 border rounded">
+  <div className="w-8 h-8 bg-green-500 text-white rounded-full flex items-center justify-center text-sm font-bold">
+    2
+  </div>
+  <div>
+    <h4 className="font-semibold">Rate Limiting</h4>
+    <p className="text-sm text-gray-600">Multi-tier request/bandwidth/points limits</p>
+  </div>
+</div>
+
+<div className="flex items-center space-x-4 p-3 border rounded">
+  <div className="w-8 h-8 bg-green-500 text-white rounded-full flex items-center justify-center text-sm font-bold">
+    3
+  </div>
+  <div>
+    <h4 className="font-semibold">Compression</h4>
+    <p className="text-sm text-gray-600">GZip for responses > 1KB</p>
+  </div>
+</div>
+
+</div>
+
+### WebSocket Forwarding
+
+Real-time data streaming via Redis pubsub (`routers/forwarder.py`)
+
+## Configuration System
+
+### Schema Validation (`config-schema.yml`)
+
+<div className="space-y-2 my-4">
+
+- Yamale-based schema enforcement
+- Type safety for all fields
+- Inheritance patterns for DRY configuration
+
+</div>
+
+### Environment Management
+
+<div className="p-4 bg-yellow-50 border-l-4 border-yellow-400 my-4">
+
+Multi-layer configuration: defaults → `.env` → CLI args → runtime validation
+
+</div>
+
+## Performance Characteristics
+
+### Scalability
+
+<div className="grid grid-cols-1 md:grid-cols-2 gap-4 my-4">
+
+<div className="p-4 bg-green-50 rounded">
+
+**Horizontal**
+Add more ingester instances
+
+**Vertical**
+Increase `max_jobs` per instance
+
+</div>
+
+<div className="p-4 bg-green-50 rounded">
+
+**Storage**
+Columnar database optimization
+
+**Network**
+Connection pooling and reuse
+
+</div>
+
+</div>
+
+### Resource Efficiency
+
+<div className="grid grid-cols-1 md:grid-cols-2 gap-4 my-4">
+
+<div className="space-y-2">
+
+- **Memory**: Streaming data processing
+- **CPU**: Async/await concurrency model
+
+</div>
+
+<div className="space-y-2">
+
+- **I/O**: Batch operations and connection pooling
+- **Storage**: Compressed time-series data
+
+</div>
+
+</div>
+
+## Security Model
+
+### Rate Limiting (`limiter.py`)
+
+Multi-dimensional limits: requests, bandwidth, points per minute/hour/day
+
+### Access Control
+
+<div className="space-y-2 my-4">
+
+- IP-based whitelisting/blacklisting
+- Domain-restricted CORS policies
+- User identification via headers/IPs
+
+</div>
+
+## Error Handling & Reliability
+
+### Retry Mechanisms
+
+<div className="space-y-2 my-4">
+
+- Configurable retry counts and cooldowns (`state.py:args`)
+- Exponential backoff for transient failures
+- Circuit breaker patterns for persistent failures
+
+</div>
+
+### Monitoring
+
+<div className="grid grid-cols-1 md:grid-cols-3 gap-4 my-4">
+
+<div className="p-3 text-center border rounded">
+
+**Logging**
+Comprehensive logging (`utils/`)
+
+</div>
+
+<div className="p-3 text-center border rounded">
+
+**Health Checks**
+Health check endpoints (`/ping`)
+
+</div>
+
+<div className="p-3 text-center border rounded">
+
+**Metrics**
+Performance metrics collection
+
+</div>
+
+</div>
+
+### Data Integrity
+
+<div className="space-y-2 my-4">
+
+- Transactional database operations
+- Schema validation at ingestion time
+- Duplicate detection and handling
+
+</div>
+
+## Extension Points
+
+### Planned Enhancements
+
+<div className="grid grid-cols-1 md:grid-cols-2 gap-4 my-4">
+
+<div className="space-y-2">
+
+1. **Additional Protocols**: FIX API, more blockchain networks
+2. **Storage Backends**: Complete adapter implementations
+3. **Streaming**: Real-time processing pipelines
+
+</div>
+
+<div className="space-y-2">
+
+4. **ML Integration**: Anomaly detection and forecasting
+5. **Observability**: Metrics, tracing, and alerting
+
+</div>
+
+</div>
+
+### Customization
+
+<div className="space-y-2 my-4">
+
+- Custom transformer functions (`transform.py`)
+- Protocol-specific adapters (`src/adapters/`)
+- Database backend implementations
+- Middleware components (`src/server/middlewares/`)
+- Authentication providers
+
+</div>

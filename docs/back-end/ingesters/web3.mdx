@@ -1,0 +1,423 @@
+---
+title: 'Web3 Ingesters'
+description: 'Blockchain data ingestion for EVM, Solana, Sui, Aptos, and other chains'
+category: 'Data Ingestion'
+order: 7
+---
+
+# Web3 Ingesters
+
+Chomp provides comprehensive blockchain data ingestion through specialized ingesters for different blockchain ecosystems. All Web3 ingesters follow a consistent pattern with two main types: **callers** for querying smart contract data and **loggers** for monitoring real-time events.
+
+## Architecture Pattern
+
+### Caller Types
+- **Purpose**: Recurrent querying of smart contract data and view functions
+- **Pattern**: Multicall optimization for batch requests
+- **Frequency**: Interval-based polling (e.g., every 30 seconds)
+- **Use Cases**: Price feeds, protocol metrics, account balances
+
+### Logger Types
+- **Purpose**: Real-time event listening and collection
+- **Pattern**: Continuous monitoring with event decoding
+- **Frequency**: Real-time as events occur
+- **Use Cases**: Transaction monitoring, state changes, protocol events
+
+---
+
+## EVM Ingesters (Ethereum & L2s)
+
+### EVM Caller (`evm_caller`)
+
+#### Overview
+Query smart contract view functions across all EVM-compatible chains using optimized multicall patterns. Supports complex ABI decoding and automatic RPC failover.
+
+#### Key Features
+- **Multicall Optimization**: Batches multiple contract calls into single RPC request
+- **ABI Parsing**: Automatic function signature parsing and return value decoding
+- **Chain Support**: All EVM chains (Ethereum, Polygon, Arbitrum, Optimism, etc.)
+- **RPC Failover**: Automatic rotation between multiple RPC endpoints
+- **Batch Splitting**: Intelligent batching to handle RPC limits
+- **Resource Monitoring**: Track response times and data usage per chain
+
+#### Configuration Example
+
+```yaml
+evm_caller:
+  - name: 'chainlink_feeds'
+    interval: 's60'
+    resource_type: 'timeseries'
+    fields:
+      - name: 'BTC_USD'
+        target: '1:0xF4030086522a5bEEa4988F8cA5B36dbC97BeE88c'  # chainId:address
+        selector: 'latestRoundData()((uint80,int256,uint256,uint256,uint80))'
+        transformers: ['{self}[1] / 1e8']  # Extract price and normalize
+        type: 'float64'
+
+      - name: 'ETH_USD'
+        target: '1:0x5f4eC3Df9cbd43714FE2740f5E3616155c5b8419'
+        selector: 'latestRoundData()((uint80,int256,uint256,uint256,uint80))'
+        transformers: ['{self}[1] / 1e8']
+        type: 'float64'
+
+  - name: 'uniswap_pools'
+    interval: 's30'
+    fields:
+      - name: 'usdc_eth_price'
+        target: '1:0x88e6A0c2dDD26FEEb64F039a2c41296FcB3f5640'  # USDC/ETH 0.05% pool
+        selector: 'slot0()((uint160,int24,uint16,uint16,uint16,uint8,bool))'
+        transformers: ['({self}[0] / 2**96) ** 2 / 1e12']  # Convert sqrtPriceX96 to price
+        type: 'float64'
+
+      - name: 'pool_liquidity'
+        target: '1:0x88e6A0c2dDD26FEEb64F039a2c41296FcB3f5640'
+        selector: 'liquidity()(uint128)'
+        type: 'uint128'
+
+  - name: 'multi_chain_tvl'
+    interval: 'm5'
+    fields:
+      - name: 'ethereum_tvl'
+        target: '1:0xProtocolAddress'
+        selector: 'totalValueLocked()(uint256)'
+        transformers: ['{self} / 1e18']
+
+      - name: 'arbitrum_tvl'
+        target: '42161:0xProtocolAddress'  # Arbitrum One
+        selector: 'totalValueLocked()(uint256)'
+        transformers: ['{self} / 1e18']
+
+      - name: 'polygon_tvl'
+        target: '137:0xProtocolAddress'  # Polygon
+        selector: 'totalValueLocked()(uint256)'
+        transformers: ['{self} / 1e18']
+```
+
+#### Advanced Features
+
+##### Multi-Return Functions
+Handle functions that return multiple values:
+
+```yaml
+fields:
+  - name: 'pool_reserves'
+    target: '1:0xPoolAddress'
+    selector: 'getReserves()((uint112,uint112,uint32))'
+    # Returns array: [reserve0, reserve1, blockTimestampLast]
+    # Access individual elements in transformers: {self}[0], {self}[1], etc.
+```
+
+##### Custom ABI Parameters
+Pass parameters to contract functions:
+
+```yaml
+fields:
+  - name: 'user_balance'
+    target: '1:0xTokenAddress'
+    selector: 'balanceOf(address)(uint256)'
+    params: ['0xUserAddress']
+    transformers: ['{self} / 1e18']
+```
+
+### EVM Logger (`evm_logger`)
+
+#### Overview
+Monitor real-time events from EVM smart contracts with automatic decoding and filtering. Tracks block progression and handles event parsing.
+
+#### Key Features
+- **Real-time Monitoring**: Continuous event polling from latest blocks
+- **Event Decoding**: Automatic ABI parsing and parameter extraction
+- **Multi-Contract Support**: Monitor multiple contracts simultaneously
+- **Indexed Parameter Handling**: Proper ordering of indexed vs non-indexed parameters
+- **Block Progression Tracking**: Maintains last processed block per contract
+
+#### Configuration Example
+
+```yaml
+evm_logger:
+  - name: 'uniswap_swaps'
+    interval: 's10'
+    resource_type: 'events'
+    fields:
+      - name: 'usdc_eth_swaps'
+        target: '1:0x88e6A0c2dDD26FEEb64F039a2c41296FcB3f5640'
+        selector: 'Swap(indexed address,indexed address,int256,int256,uint160,uint128,int24)'
+        # Event signature with indexed parameters marked
+
+      - name: 'transfer_events'
+        target: '1:0xA0b86a33E6411e5c38e0e39b36EbB8b3dF7A0C83'  # USDC
+        selector: 'Transfer(indexed address,indexed address,uint256)'
+
+  - name: 'lending_events'
+    interval: 's5'
+    fields:
+      - name: 'compound_borrows'
+        target: '1:0xCompoundMarket'
+        selector: 'Borrow(address,uint256,uint256,uint256)'
+
+      - name: 'compound_repays'
+        target: '1:0xCompoundMarket'
+        selector: 'RepayBorrow(address,address,uint256,uint256,uint256)'
+```
+
+#### Known Limitations
+
+<div className="bg-yellow-50 border-l-4 border-yellow-400 p-4 my-4">
+
+**Block Reorganization Support**: Currently not implemented but planned for future releases. The ingester will track and handle chain reorganizations to ensure data consistency.
+
+</div>
+
+---
+
+## Solana (SVM) Ingesters
+
+### SVM Caller (`svm_caller`)
+
+#### Overview
+Fetch account data from Solana using batch-optimized RPC calls. Supports raw account data extraction with configurable byte range selection.
+
+#### Key Features
+- **Batch Optimization**: Up to 100 accounts per `getMultipleAccounts` request
+- **Account Data Parsing**: Raw byte data extraction with range selectors
+- **Base64 Encoding**: Automatic handling of Solana's base64 account data
+- **RPC Failover**: Multiple Solana RPC endpoint support
+- **Parallel Processing**: Concurrent batch processing for large account sets
+
+#### Configuration Example
+
+```yaml
+svm_caller:
+  - name: 'token_accounts'
+    interval: 's30'
+    resource_type: 'timeseries'
+    fields:
+      - name: 'usdc_supply'
+        target: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v'  # USDC mint
+        selector: '36:44'  # Supply bytes in mint account
+        transformers: ['int.from_bytes({self}[0], "little") / 1e6']
+        type: 'float64'
+
+      - name: 'sol_price_feed'
+        target: 'H6ARHf6YXhGYeQfUzQNGk6rDNnLBQKrenN712K4AQJEG'  # Pyth SOL/USD
+        selector: '208:216,240:248'  # Price and confidence bytes
+        transformers: [
+          'int.from_bytes({self}[0], "little", signed=True) / 1e8',  # Price
+          'int.from_bytes({self}[1], "little") / 1e8'  # Confidence
+        ]
+
+  - name: 'dex_pools'
+    interval: 's15'
+    fields:
+      - name: 'raydium_pool_data'
+        target: 'PoolAccountAddress'
+        selector: '0:32,32:64,64:96'  # token_a_mint, token_b_mint, fee_rate
+        # Returns list of byte arrays for each range
+```
+
+#### Account Data Selection
+
+Solana account data uses byte range selectors:
+
+```yaml
+selector: 'start:end'          # Single byte range
+selector: 'start1:end1,start2:end2'  # Multiple ranges (returns list)
+```
+
+### SVM Logger (`svm_logger`) *(Work in Progress)*
+
+#### Overview
+Monitor Solana transaction logs and program events in real-time. Will follow the EVM logger pattern for event processing.
+
+#### Planned Features
+- **Transaction Monitoring**: Real-time transaction and instruction tracking
+- **Program Log Parsing**: Custom log message extraction from program executions
+- **Account Change Tracking**: Monitor account data modifications
+- **Slot Progression**: Track Solana slots and handle forks
+
+#### Expected Configuration *(Design Phase)*
+
+```yaml
+svm_logger:
+  - name: 'program_events'
+    interval: 's5'
+    fields:
+      - name: 'swap_events'
+        target: 'ProgramAddress'
+        instruction_filter: 'swap'
+        handler: |
+          def parse_swap_log(log_message, epochs):
+            # Parse program log messages
+            epochs[0]['swaps'].append(parse_swap_data(log_message))
+        reducer: |
+          def aggregate_swaps(epochs):
+            return len(epochs[0].get('swaps', [])) if epochs else 0
+```
+
+---
+
+## Sui Ingesters
+
+### Sui Caller (`sui_caller`) *(Partial Implementation)*
+
+#### Overview
+Query Sui object data using the Sui RPC API. Currently supports basic object field extraction with planned enhancements for multi-selector support.
+
+#### Key Features
+- **Object Data Fetching**: Batch requests for multiple Sui objects
+- **Field Selection**: Extract specific fields from Move objects
+- **RPC Management**: Multiple Sui RPC endpoint support
+- **Type Safety**: Sui's type system integration for data validation
+
+#### Configuration Example
+
+```yaml
+sui_caller:
+  - name: 'sui_objects'
+    interval: 's45'
+    resource_type: 'timeseries'
+    fields:
+      - name: 'pool_balance'
+        target: 'ObjectId'
+        selector: 'balance'
+        type: 'uint64'
+
+      - name: 'nft_metadata'
+        target: 'NFTObjectId'
+        selector: 'name'
+        type: 'string'
+```
+
+#### Current Limitations
+- Multi-selector support (comma-separated) not yet implemented
+- Limited Move type handling compared to full specification
+
+### Sui Logger (`sui_logger`) *(Work in Progress)*
+
+#### Overview
+Monitor Sui events and transaction effects in real-time following the established logger pattern.
+
+#### Planned Features
+- **Event Monitoring**: Track Move module events
+- **Transaction Effects**: Monitor object changes and gas usage
+- **Type-Aware Parsing**: Leverage Sui's type system for event decoding
+- **Checkpoint Tracking**: Follow Sui consensus checkpoints
+
+---
+
+## Other Blockchain Ingesters *(Work in Progress)*
+
+### Aptos Ingesters
+
+#### Aptos Caller (`aptos_caller`)
+- **Purpose**: Query Move resources and module data
+- **Pattern**: Similar to SUI caller with Aptos-specific resource addressing
+- **Features**: Resource type handling, account data fetching
+
+#### Aptos Logger (`aptos_logger`)
+- **Purpose**: Monitor Aptos events and transaction streams
+- **Pattern**: Event subscription with Move type decoding
+- **Features**: Transaction stream processing, event filtering
+
+### TON Ingesters
+
+#### TON Caller (`ton_caller`)
+- **Purpose**: Query TON smart contracts and account states
+- **Pattern**: TVM-specific data extraction and cell parsing
+- **Features**: Account state querying, contract interaction
+
+#### TON Logger (`ton_logger`)
+- **Purpose**: Monitor TON transactions and messages
+- **Pattern**: Real-time message monitoring with TVM trace analysis
+- **Features**: Transaction tracking, message flow analysis
+
+---
+
+## Common Configuration Patterns
+
+### Multi-Chain Support
+Configure the same protocol across multiple chains:
+
+```yaml
+evm_caller:
+  - name: 'cross_chain_tvl'
+    interval: 'm5'
+    fields:
+      - name: 'ethereum_tvl'
+        target: '1:0xProtocol'       # Ethereum mainnet
+      - name: 'arbitrum_tvl'
+        target: '42161:0xProtocol'   # Arbitrum One
+      - name: 'optimism_tvl'
+        target: '10:0xProtocol'      # Optimism
+      - name: 'polygon_tvl'
+        target: '137:0xProtocol'     # Polygon
+```
+
+### Error Handling & Monitoring
+All Web3 ingesters support:
+
+```yaml
+max_retries: 3
+rpc_rotation: true  # Automatically rotate RPC endpoints on failures
+monitor:
+  enabled: true
+  track_block_lag: true
+  track_rpc_performance: true
+```
+
+### Performance Optimization
+
+#### Batch Configuration
+Optimize batch sizes for different chains:
+
+```yaml
+# For EVM callers
+max_batch_size: 100      # Calls per multicall
+retry_batch_size: 4      # Fallback batch size on failures
+
+# For SVM callers
+max_batch_size: 50       # Conservative for Solana getMultipleAccounts
+```
+
+#### RPC Management
+Configure multiple endpoints for redundancy:
+
+```yaml
+# Environment or config file
+ETHEREUM_RPC_URLS: "https://eth-mainnet.alchemyapi.io/v2/key1,https://mainnet.infura.io/v3/key2"
+SOLANA_RPC_URLS: "https://api.mainnet-beta.solana.com,https://solana-api.projectserum.com"
+```
+
+## Performance Considerations
+
+### EVM Optimization
+- Use multicall patterns to reduce RPC calls
+- Configure appropriate batch sizes based on RPC limits
+- Monitor gas limit constraints for complex calls
+
+### Solana Optimization
+- Batch account requests up to 100 accounts per call
+- Use byte range selectors to minimize data transfer
+- Consider commitment levels for consistency vs speed
+
+### General Best Practices
+- Implement RPC endpoint rotation for reliability
+- Monitor block lag and RPC response times
+- Use appropriate intervals based on chain block times
+- Cache expensive data transformations
+
+## Chain Support Status
+
+### ✅ Fully Supported
+- **EVM Chains**: Ethereum, Polygon, Arbitrum, Optimism, Base, BSC, Avalanche
+- **Solana**: Mainnet and devnet support
+
+### 🔄 Partial Support
+- **Sui**: Basic object querying (needs enhancement)
+
+### 📋 Planned Support
+- **Aptos**: Resource queries and event monitoring
+- **TON**: Smart contract integration and transaction monitoring
+- **Additional EVMs**: Layer 2 solutions and sidechains
+
+All planned blockchain integrations will follow the established caller/logger pattern for consistency and ease of use.

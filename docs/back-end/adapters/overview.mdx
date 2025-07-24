@@ -1,0 +1,90 @@
+# Adapters Overview
+
+Chomp's adapter architecture enables seamless integration with multiple storage and caching backends. This modular design allows you to choose the optimal database for your specific use case or integrate with existing infrastructure.
+
+## Architecture Components
+
+Chomp uses a dual-engine architecture combining:
+- **Storage Adapters**: Long-term, compressed time-series storage
+- **Cache Adapters**: High-speed in-memory operations and cluster coordination
+
+## Supported Adapters
+
+### Storage Adapters
+- **TDengine** (default): High-compression time-series database optimized for IoT workloads
+- **TimescaleDB**: PostgreSQL-based time-series database
+- **InfluxDB**: Purpose-built time-series database
+- **QuestDB**: High-performance time-series database
+
+[📖 View all storage adapters →](./storage)
+
+### Cache Adapters
+- **Redis** (default): In-memory data structure store for caching and cluster coordination
+- **Redis Cluster**: Distributed Redis setup for high availability
+
+[📖 View cache configuration →](./cache)
+
+## Uncompromised Performance
+
+**Chomp inherits blazing performance directly from its dual-engine architecture**: Redis powers lightning-fast caching and cluster synchronization, while TDengine delivers high-compression time-series storage with massive ingestion rates.
+
+| Component | Performance Metric | Specification | Minimum Hardware |
+|-----------|-------------------|---------------|------------------|
+| **Redis Caching** | Transactions/sec | 50,000–1,000,000+ TPS* | 500MB RAM |
+| | Average Latency | 0.2–1ms (P99 <1ms)* | 1 vCPU core |
+| | Cache Efficiency | 10–100MB for 100K keys* | Low bandwidth |
+| **TDengine Storage** | Ingestion Speed | 1–10M rows/sec (single node)† | 1GB RAM |
+| | Cluster Ingestion | 10–50M rows/sec† | 1 vCPU core |
+| | Query Performance | 0.1–5s for 1–10M rows† | SSD preferred |
+| | Storage Latency | 0.1–1ms ingestion† | Low I/O overhead |
+| **Combined Chomp** | **Total Throughput** | **Millions daily, hundreds of millions with decent config** | **2 vCPU (>2GFLOPS each)** |
+| | **Memory Footprint** | **Runs on Raspberry Pi 4** | **1.5GB total RAM** |
+| | **Scaling** | **Linear cluster performance** | **Arm/AMD compatible** |
+
+**Why So Little Hardware?**
+- Redis eliminates database bottlenecks with in-memory operations
+- TDengine's columnar compression reduces storage I/O by 10x
+- Cluster synchronization prevents resource competition
+- Optimized for IoT-scale efficiency on any hardware
+
+*Sources: [Redis Benchmarks](https://redis.io/docs/latest/operate/oss_and_stack/management/optimization/benchmarks/), [Azure Cache Performance](https://learn.microsoft.com/en-us/azure/azure-cache-for-redis/cache-best-practices-performance?tabs=redis)
+
+†Sources: [TDengine Performance](https://tdengine.com/high-performance/), [IoT Database Comparison](https://tdengine.com/iot-performance-comparison-influxdb-and-timescaledb-vs-tdengine/)
+
+## Scaling Architecture
+
+- **Vertical Scaling**: Decent configurations can handle hundreds of millions of data points per day
+- **Horizontal Scaling**: Nodes automatically sync via cluster Redis, preventing resource competition
+- **Monitoring Integration**: System monitoring through protected resources in schema discovery
+
+## Custom Adapters
+
+Want to integrate with a database not listed here? Chomp's adapter system is designed for extensibility:
+
+1. **Fork the repository**: [github.com/btr-supply/chomp](https://github.com/btr-supply/chomp)
+2. **Create your adapter**: Follow the adapter interface in `/src/adapters/`
+3. **Submit a PR**: Share your adapter with the community
+
+## Configuration
+
+Adapters are configured through your main `chomp.yml` configuration file:
+
+```yaml
+storage:
+  adapter: tdengine  # or timescaledb, influxdb, questdb
+  host: localhost
+  port: 6030
+  database: chomp
+
+cache:
+  adapter: redis
+  host: localhost
+  port: 6379
+  database: 0
+```
+
+## Next Steps
+
+- [Configure storage adapters →](./storage)
+- [Setup cache adapters →](./cache)
+- [View testing guidelines →](./testing)

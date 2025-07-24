@@ -1,0 +1,322 @@
+---
+title: 'Storage Adapters'
+description: "Chomp's pluggable storage adapter system for various database backends"
+category: 'Data Layer'
+order: 6
+---
+
+# Storage Adapters
+
+Chomp's pluggable storage adapter system for various database backends.
+
+## Overview
+
+Storage adapters implement the unified `Tsdb` interface defined in `src/model.py`. This allows seamless switching between database backends. Redis is used for caching, pubsub, and synchronization of instances.
+
+<div className="bg-blue-50 p-4 rounded-lg my-4">
+
+**Key Benefits**:
+
+- Unified interface across all database backends
+- Hot-swappable storage engines
+- Consistent API regardless of underlying database
+- Built-in Redis caching layer
+
+</div>
+
+## Base Interface
+
+All adapters implement the abstract `Tsdb` base class with these core methods:
+
+<div className="grid grid-cols-1 md:grid-cols-2 gap-4 my-4">
+
+<div className="p-3 bg-gray-50 rounded">
+
+**Connection Management**
+
+- `connect()` - Establish database connection
+- `ping()` - Health check
+- `close()` - Clean shutdown
+
+</div>
+
+<div className="p-3 bg-gray-50 rounded">
+
+**Data Operations**
+
+- `create_table()` - Schema management
+- `insert()`, `insert_many()` - Data ingestion
+- `fetch()`, `fetch_batch()` - Data retrieval
+- `list_tables()` - Schema discovery
+
+</div>
+
+</div>
+
+## Currently Active Implementations
+
+### TDengine (`src/adapters/tdengine.py`) - Primary
+
+<div className="border-l-4 border-green-500 p-4 my-4 bg-green-50">
+
+**Class**: `Taos(Tsdb)`
+
+**Purpose**: High-performance time-series database
+
+**Features**:
+
+- Columnar storage with built-in compression
+- Optimized for time-series workloads
+- Native SQL interface
+- Automatic data retention policies
+
+**Configuration**:
+
+- `DB_HOST`, `DB_PORT`, `DB_DB`
+- `DB_RW_USER`, `DB_RW_PASS`
+
+**Status**: ✅ **Extensively tested and production-ready**
+
+</div>
+
+### SQLite (`src/adapters/sqlite.py`)
+
+<div className="border-l-4 border-blue-500 p-4 my-4 bg-blue-50">
+
+**Class**: `SQLite(Tsdb)`
+
+**Purpose**: Lightweight embedded SQL database
+
+**Features**:
+
+- File-based storage
+- ACID transactions
+- No server required
+- Perfect for development and small deployments
+
+**Configuration**: Database file path configuration
+
+</div>
+
+### ClickHouse (`src/adapters/clickhouse.py`)
+
+<div className="border-l-4 border-purple-500 p-4 my-4 bg-purple-50">
+
+**Class**: `ClickHouse(Tsdb)`
+
+**Purpose**: Column-oriented database for analytical workloads
+
+**Features**:
+
+- Vectorized query execution
+- Advanced compression algorithms
+- Distributed architecture support
+- Excellent for analytics and reporting
+
+**Configuration**: Standard database connection parameters
+
+</div>
+
+### DuckDB (`src/adapters/duckdb.py`)
+
+<div className="border-l-4 border-yellow-500 p-4 my-4 bg-yellow-50">
+
+**Class**: `DuckDB(Tsdb)`
+
+**Purpose**: In-process analytical database
+
+**Features**:
+
+- Time-series support with `time_bucket`
+- Excellent analytics performance
+- Zero-configuration embedded database
+- SQL-compatible interface
+
+**Configuration**: Embedded database configuration
+
+</div>
+
+## Available but Disabled Implementations
+
+<div className="bg-yellow-50 border-l-4 border-yellow-400 p-4 my-4">
+
+The following adapters are implemented but commented out in `main.py`. They can be enabled for specific use cases:
+
+</div>
+
+<div className="grid grid-cols-1 md:grid-cols-2 gap-4 my-4">
+
+<div className="p-4 border rounded-lg">
+
+### TimescaleDB
+
+**PostgreSQL extension for time-series**
+
+- Hypertables and continuous aggregates
+- Compression policies
+- `time_bucket` aggregation
+
+### InfluxDB
+
+**Purpose-built time-series database**
+
+- Line protocol format
+- Retention policies
+- Continuous queries
+
+### MongoDB
+
+**Document store with time-series collections**
+
+- Flexible schema
+- Aggregation pipeline
+
+</div>
+
+<div className="p-4 border rounded-lg">
+
+### QuestDB
+
+**High-performance time-series database**
+
+- SQL interface
+- Columnar storage
+- Fast ingestion
+
+### VictoriaMetrics
+
+**Prometheus-compatible time-series database**
+
+- High compression
+- Fast queries
+- Prometheus compatibility
+
+### OpenTSDB
+
+**Scalable time-series data store**
+
+- HBase backend
+- Metric-based storage
+
+</div>
+
+</div>
+
+## Additional Storage Systems
+
+### Redis (Caching & PubSub)
+
+<div className="border-l-4 border-red-500 p-4 my-4 bg-red-50">
+
+**Purpose**: Caching, real-time messaging, and instance synchronization
+
+**Features**:
+
+- In-memory storage for ultra-fast access
+- Pub/sub messaging for real-time updates
+- Distributed locking for cluster coordination
+- Rate limiting and session management
+
+**Configuration**:
+
+- `REDIS_HOST`, `REDIS_PORT`, `REDIS_DB`
+- `REDIS_MAX_CONNECTIONS`
+
+**Status**: ✅ **Extensively tested and production-ready**
+
+**Usage**: Used via `RedisProxy` for caching, rate limiting, and WebSocket forwarding
+
+</div>
+
+## Adapter Selection
+
+The active adapter is controlled by the `TSDB_ADAPTER` environment variable:
+
+<div className="bg-gray-50 p-4 rounded-lg my-4">
+
+```env
+# Currently supported adapters
+TSDB_ADAPTER=tdengine     # Default - production ready
+TSDB_ADAPTER=sqlite       # Development/embedded
+TSDB_ADAPTER=clickhouse   # Analytics workloads
+TSDB_ADAPTER=duckdb       # In-process analytics
+```
+
+</div>
+
+## Configuration
+
+Adapters are selected at runtime in `main.py` via `get_adapter_class()`. Connection details are configured through adapter-specific environment variables.
+
+<div className="grid grid-cols-1 md:grid-cols-2 gap-4 my-4">
+
+<div className="p-4 bg-gray-50 rounded">
+
+**TDengine Configuration**
+
+```env
+DB_HOST=localhost
+DB_PORT=40002
+DB_HTTP_PORT=40003
+DB_RW_USER=rw
+DB_RW_PASS=pass
+```
+
+</div>
+
+<div className="p-4 bg-gray-50 rounded">
+
+**Redis Configuration**
+
+```env
+REDIS_HOST=localhost
+REDIS_PORT=6379
+REDIS_DB=0
+REDIS_NS=chomp
+```
+
+</div>
+
+</div>
+
+## Testing Status
+
+<div className="bg-red-50 border-l-4 border-red-400 p-4 my-4">
+
+⚠️ **Important**: Only **TDengine** and **Redis** have been extensively tested in production environments.
+
+Other adapters should be considered experimental and may require additional testing and validation before production use.
+
+</div>
+
+## Implementation Example
+
+<div className="bg-gray-50 p-4 rounded-lg my-4">
+
+```python
+# Adapter usage example
+from src.adapters.tdengine import Taos
+
+# Initialize adapter
+db = Taos()
+await db.connect()
+
+# Create table with schema
+await db.create_table("prices", {
+    "ts": "timestamp",
+    "symbol": "varchar(10)",
+    "price": "float"
+})
+
+# Insert data
+await db.insert("prices", {
+    "ts": "2024-01-01T00:00:00Z",
+    "symbol": "BTC",
+    "price": 45000.0
+})
+
+# Query data
+results = await db.fetch("SELECT * FROM prices WHERE symbol='BTC'")
+```
+
+</div>

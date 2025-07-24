@@ -1,0 +1,400 @@
+---
+title: 'Adapter Testing Guide'
+description: 'Testing strategies for database adapters, caching, and storage systems'
+category: 'Adapters'
+order: 4
+---
+
+# Adapter Testing Guide
+
+## Overview
+
+Adapter testing in Chomp focuses on **real database connections**, **cache systems**, and **storage adapters** without mocking. Tests automatically skip when dependencies are unavailable.
+
+<div className="bg-green-50 border-l-4 border-green-400 p-4 my-6">
+
+**Key Philosophy**: Test with real databases and cache systems to catch actual integration issues.
+
+</div>
+
+## Database Adapter Testing
+
+### Supported Database Adapters
+
+<div className="grid grid-cols-1 md:grid-cols-2 gap-4 my-6">
+
+<div className="p-4 border rounded-lg">
+**Time Series Databases**
+- `test_adapters_tdengine.py` - TDengine time series (uses `taos`)
+- `test_adapters_influxdb.py` - InfluxDB metrics
+- `test_adapters_victoriametrics.py` - VictoriaMetrics
+</div>
+
+<div className="p-4 border rounded-lg">
+**General Databases**
+- `test_adapters_clickhouse.py` - ClickHouse analytics
+- `test_adapters_mongodb.py` - MongoDB document store
+- `test_adapters_duckdb.py` - DuckDB analytics
+- `test_adapters_sqlite.py` - SQLite local database
+</div>
+
+</div>
+
+### Additional Adapter Tests
+- `test_adapters_evm_rpc.py` - Ethereum RPC adapter (requires `eth_utils`, `hexbytes`, `eth_account`)
+- `test_adapters.py` - General adapter functionality
+
+### Current Test Coverage
+
+#### TDengine Adapter
+```bash
+# Requires: taos (not taospy as previously documented)
+pytest tests/test_adapters_tdengine.py
+```
+
+#### InfluxDB Adapter
+```bash
+# Requires: influxdb-client
+pytest tests/test_adapters_influxdb.py
+```
+
+#### ClickHouse Adapter
+```bash
+# Requires: asynch
+pytest tests/test_adapters_clickhouse.py
+```
+
+#### MongoDB Adapter
+```bash
+# Requires: motor
+pytest tests/test_adapters_mongodb.py
+```
+
+#### DuckDB Adapter
+```bash
+# Requires: duckdb
+pytest tests/test_adapters_duckdb.py
+```
+
+#### EVM RPC Adapter
+```bash
+# Requires: eth_utils, hexbytes, eth_account
+pytest tests/test_adapters_evm_rpc.py
+```
+
+## Dependency Detection Pattern
+
+```python
+from src.deps import safe_import
+
+# Check dependency availability (TDengine example)
+taos = safe_import("taos")  # NB: uses 'taos', not 'taospy'
+DB_AVAILABLE = taos is not None
+
+# Skip entire test class if dependencies unavailable
+@pytest.mark.skipif(not DB_AVAILABLE, reason="TDengine dependencies not available (taos/taospy)")
+class TestTaosAdapter:
+    def test_with_real_tdengine(self):
+        # Uses actual TDengine connection, not mocks
+        adapter = Taos()
+        result = adapter.execute_query("SHOW DATABASES")
+        assert result is not None
+```
+
+## Cache and Storage Testing
+
+### Cache Testing
+- `test_cache.py` - Cache system functionality
+- `test_proxies_redis.py` - Redis proxy testing
+- `test_proxies.py` - General proxy functionality
+
+### State and Configuration Testing
+- `test_state.py` - Application state management
+- `test_server_config.py` - Server configuration validation
+
+## Installing Database Dependencies
+
+### Time Series Databases
+```bash
+# TDengine (note: package is 'taos', not 'taospy')
+pip install taos
+
+# InfluxDB
+pip install influxdb-client
+
+# VictoriaMetrics (HTTP-based)
+# No additional dependencies required
+```
+
+### Analytics Databases
+```bash
+# ClickHouse
+pip install asynch
+
+# DuckDB
+pip install duckdb
+```
+
+### Document Databases
+```bash
+# MongoDB
+pip install motor
+```
+
+### Blockchain RPC
+```bash
+# Ethereum RPC
+pip install eth-utils hexbytes eth-account
+```
+
+## Writing New Adapter Tests
+
+### Pattern for New Database Adapter
+```python
+from src.deps import safe_import
+
+new_db_client = safe_import("new_db_package")
+NEW_DB_AVAILABLE = new_db_client is not None
+
+if NEW_DB_AVAILABLE:
+    from src.adapters.new_db_adapter import NewDbAdapter
+
+@pytest.mark.skipif(not NEW_DB_AVAILABLE, reason="NewDB dependencies not available")
+class TestNewDbAdapter:
+    def test_connection(self):
+        adapter = NewDbAdapter()
+        assert adapter.test_connection()
+
+    def test_insert_data(self):
+        adapter = NewDbAdapter()
+        data = {"timestamp": "2024-01-01T00:00:00Z", "value": 100}
+        result = adapter.insert(data)
+        assert result.success
+
+    def test_query_data(self):
+        adapter = NewDbAdapter()
+        results = adapter.query("SELECT * FROM test_table LIMIT 1")
+        assert len(results) >= 0
+```
+
+### TDengine Specific Testing Patterns
+```python
+@pytest.mark.asyncio
+async def test_tdengine_types_mapping(self):
+    """Test TDengine type mappings are correct."""
+    expected_types = {
+        "int8": "tinyint",
+        "uint8": "tinyint unsigned",
+        "float32": "float",
+        "float64": "double",
+        "timestamp": "timestamp",
+        "string": "nchar"
+    }
+
+    for field_type, expected_sql_type in expected_types.items():
+        assert TYPES[field_type] == expected_sql_type
+
+@pytest.mark.asyncio
+async def test_tdengine_connection(self):
+    """Test TDengine connection with real database."""
+    adapter = await Taos.connect()
+    assert adapter is not None
+    await adapter.close()
+```
+
+### Cache Adapter Testing
+```python
+from src.deps import safe_import
+
+redis = safe_import("redis")
+REDIS_AVAILABLE = redis is not None
+
+@pytest.mark.skipif(not REDIS_AVAILABLE, reason="Redis not available")
+class TestCacheAdapter:
+    def test_set_get(self):
+        cache = CacheAdapter()
+        cache.set("test_key", "test_value")
+        result = cache.get("test_key")
+        assert result == "test_value"
+
+    def test_expire(self):
+        cache = CacheAdapter()
+        cache.set("temp_key", "temp_value", expire=1)
+        time.sleep(2)
+        result = cache.get("temp_key")
+        assert result is None
+```
+
+## Running Adapter Tests
+
+### Primary Method
+```bash
+# Run all adapter tests
+make test
+
+# Run specific adapter category
+pytest tests/test_adapters_*.py -v
+
+# Run individual adapter
+pytest tests/test_adapters_tdengine.py -v
+```
+
+### Expected Output Examples
+```
+tests/test_adapters_tdengine.py .......... PASSED
+tests/test_adapters_mongodb.py .......... SKIPPED (Dependencies not available)
+tests/test_adapters_duckdb.py ........... PASSED
+tests/test_cache.py ..................... PASSED
+```
+
+### With Dependency Installation
+```bash
+# Install all database dependencies
+pip install taos influxdb-client asynch motor duckdb eth-utils hexbytes eth-account
+
+# Run tests again (more will pass)
+pytest tests/test_adapters_*.py
+```
+
+## Real Test Examples from Codebase
+
+### TDengine Connection Testing
+```python
+@pytest.mark.asyncio
+async def test_connect_class_method(self):
+    """Test TDengine connect class method."""
+    mock_taos = Mock()
+    mock_conn = Mock()
+    mock_cursor = Mock()
+    mock_conn.cursor.return_value = mock_cursor
+    mock_taos.connect.return_value = mock_conn
+
+    with patch.dict(env, {
+        'DB_HOST': 'envhost',
+        'DB_PORT': '6030',
+        'DB_NAME': 'envdb',
+        'DB_RW_USER': 'envuser',
+        'DB_RW_PASS': 'envpass'
+    }):
+        with patch('builtins.__import__', return_value=mock_taos):
+            adapter = await Taos.connect()
+
+            assert adapter.host == 'envhost'
+            assert adapter.port == 6030
+            assert adapter.db == 'envdb'
+```
+
+### Adapter Inheritance Testing
+```python
+def test_inheritance(self):
+    """Test that TDengine adapter inherits from proper base classes."""
+    adapter = Taos()
+    # Verify adapter follows expected interface
+    assert hasattr(adapter, 'connect')
+    assert hasattr(adapter, 'execute')
+    assert hasattr(adapter, 'close')
+```
+
+## Performance Testing
+
+### Database Performance Patterns
+```python
+@pytest.mark.asyncio
+async def test_bulk_operations_performance(self):
+    adapter = DatabaseAdapter()
+
+    # Test bulk insert performance
+    start_time = time.time()
+    data = [{"id": i, "value": f"value_{i}"} for i in range(1000)]
+    await adapter.bulk_insert(data)
+    elapsed = time.time() - start_time
+
+    assert elapsed < 5.0  # Should complete in under 5 seconds
+```
+
+### Cache Performance Testing
+```python
+def test_cache_performance(self):
+    cache = CacheAdapter()
+
+    # Test cache hit performance
+    cache.set("perf_key", "perf_value")
+
+    start_time = time.time()
+    for _ in range(1000):
+        result = cache.get("perf_key")
+        assert result == "perf_value"
+    elapsed = time.time() - start_time
+
+    assert elapsed < 1.0  # 1000 cache hits in under 1 second
+```
+
+## Configuration Testing
+
+### Database Configuration Validation
+```python
+def test_database_initialization_defaults(self):
+    """Test database adapter initialization with defaults."""
+    adapter = Taos()
+
+    assert adapter.host == "localhost"
+    assert adapter.port == 40002
+    assert adapter.db == "default"
+    assert adapter.user == "rw"
+    assert adapter.password == "pass"
+```
+
+### Connection Error Handling
+```python
+@pytest.mark.asyncio
+async def test_connection_failure_handling(self):
+    """Test graceful handling of connection failures."""
+    adapter = DatabaseAdapter(host="invalid-host")
+
+    with pytest.raises(ConnectionError):
+        await adapter.connect()
+```
+
+## Key Benefits
+
+<div className="grid grid-cols-1 md:grid-cols-2 gap-6 my-6">
+
+<div className="p-4 border rounded-lg">
+**Real Integration**
+- Catches actual database issues
+- Tests real connection behavior
+- Validates type mappings and queries
+</div>
+
+<div className="p-4 border rounded-lg">
+**Environment Flexibility**
+- Adapts to available databases
+- Skips unavailable systems gracefully
+- Works in dev, CI, and production
+</div>
+
+</div>
+
+## Troubleshooting
+
+### Common Issues
+
+**TDengine Import Errors**
+- Package name is `taos`, not `taospy`
+- Verify TDengine server is running on expected port
+- Check connection credentials and network access
+
+**Database Connection Failures**
+- Verify database service is running
+- Check connection credentials
+- Confirm network accessibility
+
+**Dependency Import Errors**
+- Install required database drivers
+- Check Python version compatibility
+- Verify package installation success
+
+**Test Skipping**
+- Expected behavior when dependencies unavailable
+- Install dependencies to enable tests
+- Check dependency detection logic

@@ -1,0 +1,466 @@
+---
+title: 'Services'
+description: "Core services that implement Chomp's API server logic and business operations"
+category: 'Core Architecture'
+order: 3
+---
+
+# Services
+
+Core services that implement Chomp's API server logic and business operations. Services follow a consistent `ServiceResponse = tuple[str, any]` pattern and have a loose 1:1 relationship with router namespaces.
+
+## Overview
+
+Services implement the core business logic for Chomp's API endpoints. Each service corresponds roughly to a router namespace and follows consistent patterns:
+
+<div className="bg-blue-50 p-4 rounded-lg my-4">
+
+**Response Pattern**: `ServiceResponse = tuple[str, any]`
+
+- **Success**: `("", result_data)`
+- **Error**: `("error_message", None)`
+
+</div>
+
+**Service-Router Mapping**:
+- `auth.py` ↔ `routers/auth.py` - Authentication flows
+- `admin.py` ↔ `routers/admin.py` - System administration
+- `config.py` ↔ `routers/config.py` - Configuration management
+- `loader.py` ↔ `routers/data.py` - Data retrieval
+- Additional services provide shared functionality
+
+## Core Services
+
+### Authentication (`src/services/auth.py`)
+
+<div className="border rounded-lg p-4 my-4">
+
+**Purpose**: Unified authentication system supporting multiple auth methods with challenge-based flows
+
+**Key Functions**:
+
+- `create_auth_challenge(auth_method, client_ip, identifier)` - Create authentication challenges
+- `authenticate_with_challenge(challenge_id, credentials)` - Verify challenge responses
+- `universal_authenticate(auth_method, credentials)` - Direct authentication bypass
+- `verify_session(user_id, token)` - JWT session validation
+- `check_input_rate_limit(user_id, action)` - Exponential backoff rate limiting
+
+**Authentication Methods**:
+
+<div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-2">
+
+<div>
+- **Static Token**: Simple token-based auth for admin access
+- **OAuth2**: Twitter and GitHub OAuth2 flows
+</div>
+
+<div>
+- **Web3 Signatures**: EVM (Ethereum & cie.), SVM (Solana & cie.), and Sui blockchain wallet signatures
+- **Challenge-Based**: Secure challenge-response flows for all methods
+</div>
+
+</div>
+
+**Rate Limiting**: Implements exponential backoff (50s → 300s → 1800s → 10800s → 64800s → 345600s cap)
+
+**Session Management**: JWT tokens with Redis session storage and configurable expiry
+
+</div>
+
+### Admin (`src/services/admin.py`)
+
+<div className="border rounded-lg p-4 my-4">
+
+**Purpose**: System administration and monitoring operations
+
+**Key Functions**:
+
+- `get_all_ingester_status()` - Get status of all active ingesters from monitoring data
+- `get_ingester_details(ingester_name)` - Detailed information about specific ingester
+- `control_ingesters(action, ingester_names, force)` - Start/stop/restart ingester operations
+- `get_system_logs(level, limit, since)` - System log retrieval with filtering
+- `get_database_status()` - Database connection and health status
+- `get_cache_status()` - Redis cache status and statistics
+- `clear_cache(pattern)` - Clear cache entries by pattern
+
+**Features**:
+
+<div className="space-y-2 mt-2">
+
+- **Monitoring-Based Discovery**: Uses Redis monitoring data rather than static configuration
+- **Resource Usage Tracking**: Latency, response bytes, status codes for each ingester
+- **Process Management**: Framework for ingester lifecycle control (requires implementation)
+
+</div>
+
+**Note**: Configuration management functions moved to `services.config` module
+
+</div>
+
+### Configuration Management (`src/services/config.py`)
+
+<div className="border rounded-lg p-4 my-4">
+
+**Purpose**: Configuration file management with versioning, validation, and diff-based history
+
+**Key Functions**:
+
+<div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-2">
+
+<div>
+- `get_current_ingester_config()` - Get current ingester configuration
+- `validate_ingester_config(content)` - Validate ingester config against schema
+- `update_ingester_config(content)` - Update ingester config with validation
+</div>
+
+<div>
+- `get_current_server_config()` - Get current server configuration
+- `validate_server_config(content)` - Validate server config against schema
+- `update_server_config(content)` - Update server config with validation
+</div>
+
+</div>
+
+**Version Management**:
+
+- `get_config_history(limit, config_type)` - Get configuration change history
+- `rollback_config(steps_back, config_type)` - Rollback to previous configuration version
+- `get_config_at_version(steps_back, config_type)` - Reconstruct config at specific version
+
+**Features**:
+
+<div className="space-y-2 mt-2">
+
+- **Diff-Match-Patch**: Efficient versioning using diff storage instead of full snapshots
+- **Schema Validation**: YAML schema validation using Yamale before applying changes
+- **Atomic Updates**: Safe configuration updates with rollback on validation failure
+- **History Limiting**: Configurable history retention (default: 50 versions)
+
+</div>
+
+</div>
+
+### Data Loader (`src/services/loader.py`)
+
+<div className="border rounded-lg p-4 my-4">
+
+**Purpose**: Resource management, schema discovery, and data retrieval with authentication-aware filtering
+
+**Key Functions**:
+
+<div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-2">
+
+<div>
+- `get_resources(scope, request)` - Get available resources with scope filtering
+- `parse_resources(resources, scope, request)` - Parse and validate resource strings
+- `get_schema(resources, fields, scope, request)` - Get schema information
+- `parse_fields(resource, fields, scope, request)` - Parse and validate field strings
+</div>
+
+<div>
+- `get_last_values(resources, quote, precision)` - Get latest values for resources
+- `get_history(resources, fields, from_date, to_date, interval, ...)` - Historical data retrieval
+- `format_table(data, from_format, to_format, columns)` - Data format conversion
+</div>
+
+</div>
+
+**Scope System**:
+
+- `Scope.DEFAULT` - Basic resource information
+- `Scope.DETAILED` - Extended metadata and configuration
+- `Scope.ALL` - Complete resource data
+- `Scope.TRANSIENT` - Include temporary/computed fields
+
+**Features**:
+
+<div className="space-y-2 mt-2">
+
+- **Authentication-Aware**: Filters protected resources and fields based on auth status
+- **Caching Strategy**: 5-minute in-memory cache with Redis backing
+- **Format Support**: JSON, Polars DataFrame, CSV, and custom formats
+- **Quote Currency**: Automatic conversion to specified quote currency
+
+</div>
+
+</div>
+
+### Rate Limiter (`src/services/limiter.py`)
+
+<div className="border rounded-lg p-4 my-4">
+
+**Purpose**: Multi-dimensional rate limiting with Redis-backed persistence and user-specific limits
+
+**Key Functions**:
+
+- `check_and_increment(user, path, response_bytes)` - Atomic rate limit check and counter increment
+- `get_user_limits(user_id)` - Get current usage and remaining limits for user
+- `get_route_points(path)` - Get point cost for specific route with pattern matching
+
+**Limit Types**:
+
+<div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-2">
+
+<div>
+**Requests**
+- `rpm` - Requests per minute
+- `rph` - Requests per hour
+- `rpd` - Requests per day
+</div>
+
+<div>
+**Bandwidth**
+- `spm` - Size (bytes) per minute
+- `sph` - Size (bytes) per hour
+- `spd` - Size (bytes) per day
+</div>
+
+<div>
+**Points**
+- `ppm` - Points per minute
+- `pph` - Points per hour
+- `ppd` - Points per day
+</div>
+
+</div>
+
+**Features**:
+
+<div className="space-y-2 mt-2">
+
+- **Route Point System**: Different endpoints have different point costs (configurable)
+- **User Status**: Admin users and whitelist bypass rate limits
+- **Blacklist Support**: Complete request blocking for specific users
+- **Atomic Operations**: Redis pipeline operations prevent race conditions
+
+</div>
+
+</div>
+
+### Time Series Analysis (`src/services/ts_analysis.py`)
+
+<div className="border rounded-lg p-4 my-4">
+
+**Purpose**: Statistical analysis and metrics calculation for time series data using Polars DataFrames
+
+**Key Functions**:
+
+<div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-2">
+
+<div>
+- `get_volatility(resources, fields, from_date, to_date, ...)` - Volatility metrics
+- `get_trend(resources, fields, from_date, to_date, ...)` - Trend analysis
+- `get_momentum(resources, fields, from_date, to_date, ...)` - Momentum indicators
+</div>
+
+<div>
+- `get_all(resources, fields, from_date, to_date, ...)` - Combined analysis
+- `get_oprange(resources, fields, from_date, to_date, ...)` - Operating range analysis
+- `ensure_df(resources, fields, ...)` - DataFrame preparation and loading
+</div>
+
+</div>
+
+**Analysis Types**:
+
+<div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-2">
+
+<div>
+**Volatility**
+- Standard deviation (std)
+- Weighted std (wstd)
+- Exponential weighted std (ewstd)
+- Mean absolute deviation (mad)
+- Close-based ATR (close_atr)
+</div>
+
+<div>
+**Trend**
+- Simple moving average (sma)
+- Smoothed moving average (smma)
+- Weighted moving average (wma)
+- Exponential moving average (ewma)
+- Linear regression (linreg)
+- Polynomial regression (polyreg)
+- Theil-Sen estimator (theil_sen)
+</div>
+
+<div>
+**Momentum**
+- Rate of change (roc)
+- Relative strength index (rsi)
+- Williams %R (williams_r)
+- Commodity channel index (cci)
+- Stochastic oscillator (stoch)
+</div>
+
+</div>
+
+**Features**:
+
+<div className="space-y-2 mt-2">
+
+- **Dynamic Date Fitting**: Automatically adjusts date ranges to get ~1000 data points
+- **Configurable Periods**: Multiple analysis periods (default: [20])
+- **Quote Currency Support**: Analysis in specified quote currency
+- **Format Flexibility**: Output in JSON, Polars, or other formats
+
+</div>
+
+</div>
+
+### Data Converter (`src/services/converter.py`)
+
+<div className="border rounded-lg p-4 my-4">
+
+**Purpose**: Currency/asset conversion and peg analysis between resources
+
+**Key Functions**:
+
+- `convert(pair, base_amount, quote_amount, precision)` - Convert between two resources using latest values
+- `pegcheck(pair, factor, max_deviation, precision)` - Check if two resources are pegged within deviation
+
+**Features**:
+
+<div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-2">
+
+<div>
+- **Pair Format**: `resource.field-resource.field` notation
+- **Bidirectional**: Convert either base→quote or quote→base amounts
+</div>
+
+<div>
+- **Precision Control**: Configurable decimal precision for results
+- **Peg Analysis**: Deviation calculation and range checking
+</div>
+
+</div>
+
+**Example Usage**:
+```python
+# Convert 1 BTC to USDC
+err, result = await convert("BTC.idx-USDC.idx", base_amount=1.0)
+
+# Check if USDT is pegged to USD within 0.2%
+err, result = await pegcheck("USDT.idx-USD.idx", max_deviation=0.002)
+```
+
+</div>
+
+### Status Checker (`src/services/status_checker.py`)
+
+<div className="border rounded-lg p-4 my-4">
+
+**Purpose**: System health monitoring and ping functionality
+
+**Key Functions**:
+
+- `check_status(req, utc_time)` - Health check with optional time validation
+- `ping(req, utc_time)` - Alias for check_status
+
+**Response Data**:
+- Server name and version information
+- Ping time calculation (client↔server)
+- Requester identification and IP address
+- System status ("OK" or error state)
+
+**Features**:
+
+<div className="space-y-2 mt-2">
+
+- **Time Synchronization**: UTC time validation for client-server sync
+- **Request Identification**: Uses AuthService for consistent requester ID
+- **Error Handling**: Graceful error responses with diagnostic information
+
+</div>
+
+</div>
+
+## Service Integration Patterns
+
+### Error Handling Standard
+
+<div className="bg-yellow-50 border-l-4 border-yellow-400 p-4 my-4">
+
+All services implement the `ServiceResponse` pattern for consistent error handling:
+
+```python
+# Service implementation
+async def service_function() -> ServiceResponse[ReturnType]:
+    try:
+        # Business logic
+        result = await process_data()
+        return "", result  # Success
+    except Exception as e:
+        return f"Error message: {e}", None  # Error
+
+# Router usage
+err, result = await service_function()
+if err:
+    return error_response(err)
+return success_response(result)
+```
+
+</div>
+
+### Authentication Integration
+
+<div className="bg-green-50 p-4 rounded-lg my-4">
+
+Services that handle protected resources integrate with the auth service:
+
+- **Request Authentication**: Check JWT tokens and session validity
+- **Resource Filtering**: Hide protected resources/fields for unauthenticated users
+- **Rate Limiting**: Apply user-specific rate limits based on auth status
+
+</div>
+
+### State Dependencies
+
+<div className="space-y-2 my-4">
+
+Services access shared resources through the global `state` module:
+
+- **Database Connections**: `state.tsdb` for time series operations
+- **Redis Cache**: `state.redis` for caching and pub/sub
+- **Configuration**: `state.server_config` for runtime settings
+- **Thread Pool**: `state.thread_pool` for CPU-intensive operations
+
+</div>
+
+## Performance Considerations
+
+### Caching Strategy
+
+<div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+
+<div>
+
+**Multi-Level Caching**
+- Module-level cache (5-minute expiry)
+- Redis cache with TTL
+- Database query optimization
+
+</div>
+
+<div>
+
+**Cache Invalidation**
+- Configuration changes clear relevant caches
+- Time-based expiry for data freshness
+- Manual cache clearing for admin operations
+
+</div>
+
+</div>
+
+### Async Operations
+
+<div className="space-y-2 my-4">
+
+- **Concurrent Processing**: Multiple services can run simultaneously
+- **Thread Pool Integration**: CPU-intensive operations offloaded to threads
+- **Redis Pipelining**: Batch operations for improved performance
+- **DataFrame Operations**: Polars for high-performance data analysis
+
+</div>

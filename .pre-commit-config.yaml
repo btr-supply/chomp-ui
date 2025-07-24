@@ -1,0 +1,95 @@
+# Pre-commit configuration for Chomp Frontend
+# See https://pre-commit.com for more information
+# All checks run on every commit for maximum safety and simplicity
+repos:
+  # Standard pre-commit hooks for general file maintenance
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+        exclude: \.md$
+      - id: end-of-file-fixer
+        exclude: \.md$
+      - id: check-yaml
+      - id: check-json
+      - id: check-merge-conflict
+      - id: mixed-line-ending
+        args: ['--fix=lf']
+
+  # Asset optimization for images in public directory
+  - repo: https://github.com/pde-rent/opt-pre-commit
+    rev: v1.0.3
+    hooks:
+      - id: optimize-assets
+        name: optimize raster/vector images
+        args: [--asset-dir, ./public, --mode, lossless]
+
+  # Naming conventions enforcement
+  - repo: https://github.com/pde-rent/naming-pre-commit
+    rev: v1.0.0
+    hooks:
+      # Check branch names at commit time
+      - id: check-naming
+        name: check branch name
+        description: Enforce branch naming conventions
+        stages: [pre-commit]
+        args:
+          - --check-branch
+          - --branch-pattern
+          - '^(feat|fix|refac|ops|docs)/'
+      # Check commit messages after commit message is written
+      - id: check-naming
+        name: check commit message
+        description: Enforce commit message conventions
+        stages: [commit-msg]
+        args:
+          - --check-commit
+          - --commit-pattern
+          - '^\[(feat|fix|refac|ops|docs)\] '
+
+  # Local hooks for project-specific tools using Bun
+  - repo: local
+    hooks:
+      # Oxlint - Fast JavaScript/TypeScript linter
+      - id: oxlint
+        name: oxlint
+        entry: bun run lint:fix
+        language: system
+        files: \.(js|jsx|ts|tsx)$
+        pass_filenames: false
+
+      # Next.js ESLint
+      - id: next-lint
+        name: next.js eslint
+        entry: bash -c 'bunx next lint --fix'
+        language: system
+        files: \.(js|jsx|ts|tsx)$
+        pass_filenames: false
+
+      # Prettier formatting
+      - id: prettier
+        name: prettier format
+        entry: bun run format
+        language: system
+        files: \.(js|jsx|ts|tsx|json|yaml|yml|md)$
+        pass_filenames: false
+
+      # TypeScript type checking
+      - id: typescript
+        name: typescript check
+        entry: bun run type-check
+        language: system
+        files: \.(ts|tsx)$
+        pass_filenames: false
+
+      # Build verification - ensure project builds successfully
+      - id: build-check
+        name: validate build
+        entry: bun run build
+        language: system
+        pass_filenames: false
+        stages: [pre-push]
+
+# Global configuration
+fail_fast: false
+default_stages: [pre-commit]

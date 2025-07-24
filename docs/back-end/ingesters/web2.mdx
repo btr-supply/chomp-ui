@@ -1,0 +1,402 @@
+---
+title: 'Web2 Ingesters'
+description: 'HTTP APIs, WebSocket streaming, web scraping, and financial data protocols'
+category: 'Data Ingestion'
+order: 6
+---
+
+# Web2 Ingesters
+
+Chomp provides comprehensive support for traditional web-based data sources through four main ingester types designed for different data access patterns.
+
+## HTTP API Ingester (`http_api`)
+
+### Overview
+The HTTP API ingester polls REST endpoints with intelligent connection pooling, caching, and retry mechanisms. Ideal for traditional APIs that provide data through HTTP GET requests.
+
+### Key Features
+- **Connection Pooling**: Reuses HTTP connections for better performance (512 max connections)
+- **Intelligent Caching**: Deduplicates requests using URL+interval hashing
+- **Pre-transformers**: Apply custom functions to raw API responses before field extraction
+- **Automatic Retries**: Configurable retry logic with exponential backoff
+- **Resource Monitoring**: Tracks response times, bandwidth usage, and status codes
+
+### Configuration Example
+
+```yaml
+http_api:
+  - name: 'crypto_prices'
+    target: 'https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum&vs_currencies=usd'
+    interval: 's30'
+    resource_type: 'timeseries'
+    pre_transformer: 'lambda data: {k: v["usd"] for k, v in data.items()}'
+    fields:
+      - name: 'BTC_USD'
+        selector: '.bitcoin'
+        type: 'float64'
+      - name: 'ETH_USD'
+        selector: '.ethereum'
+        type: 'float64'
+
+  - name: 'exchange_rates'
+    target: 'https://api.exchangerate-api.com/v4/latest/{base_currency}'
+    interval: 'm5'
+    fields:
+      - name: 'base_currency'
+        value: 'USD'  # Static field used in URL template
+      - name: 'EUR_rate'
+        target: 'https://api.exchangerate-api.com/v4/latest/USD'
+        selector: '.rates.EUR'
+        type: 'float64'
+```
+
+### Advanced Features
+
+#### Dynamic URL Templates
+URLs can include field placeholders that are resolved at runtime:
+
+```yaml
+fields:
+  - name: 'symbol'
+    value: 'BTCUSDT'
+  - name: 'price'
+    target: 'https://api.binance.com/api/v3/ticker/price?symbol={symbol}'
+    selector: '.price'
+```
+
+#### Pre-transformers
+Apply custom Python functions to modify API responses before field extraction:
+
+```yaml
+pre_transformer: |
+  def transform(data):
+    # Flatten nested structure
+    return {
+      'price': data['result']['price'],
+      'volume': data['result']['volume_24h']
+    }
+```
+
+---
+
+## WebSocket API Ingester (`ws_api`)
+
+### Overview
+Real-time data ingestion through persistent WebSocket connections with handler functions for processing streaming data. Supports subscription management and stateful data aggregation.
+
+### Key Features
+- **Persistent Connections**: Maintains long-lived WebSocket connections with automatic reconnection
+- **Handler Functions**: Custom data processing logic for each field
+- **State Management**: Maintains rolling epochs for aggregation (configurable, default 32)
+- **Reducer Functions**: Aggregate streaming data into periodic snapshots
+- **Batch Processing**: Groups fields by WebSocket route to minimize connections
+
+### Configuration Example
+
+```yaml
+ws_api:
+  - name: 'binance_trades'
+    interval: 's10'
+    resource_type: 'timeseries'
+    fields:
+      - name: 'btc_price'
+        target: 'wss://stream.binance.com:9443/ws/btcusdt@trade'
+        selector: '.p'
+        handler: |
+          def handle_trade(data, epochs):
+            if 'trades' not in epochs[0]:
+              epochs[0]['trades'] = []
+            epochs[0]['trades'].append(float(data))
+        reducer: |
+          def reduce_trades(epochs):
+            if epochs and 'trades' in epochs[0]:
+              return sum(epochs[0]['trades']) / len(epochs[0]['trades'])
+            return None
+
+      - name: 'btc_volume'
+        target: 'wss://stream.binance.com:9443/ws/btcusdt@trade'
+        selector: '.q'
+        handler: |
+          def handle_volume(data, epochs):
+            if 'volume' not in epochs[0]:
+              epochs[0]['volume'] = 0
+            epochs[0]['volume'] += float(data)
+        reducer: |
+          def reduce_volume(epochs):
+            return epochs[0].get('volume', 0) if epochs else 0
+
+  - name: 'orderbook_depth'
+    interval: 's5'
+    fields:
+      - name: 'bid_price'
+        target: 'wss://stream.binance.com:9443/ws/btcusdt@depth20@100ms'
+        params:
+          method: 'SUBSCRIBE'
+          params: ['btcusdt@depth20@100ms']
+          id: 1
+        selector: '.bids[0][0]'
+        handler: 'lambda data, epochs: epochs[0].update({"bid": float(data)})'
+        reducer: 'lambda epochs: epochs[0].get("bid") if epochs else None'
+```
+
+### Handler & Reducer Pattern
+
+#### Handlers
+Process individual WebSocket messages and update epoch state:
+
+```python
+def custom_handler(data, epochs):
+    """
+    data: Extracted field value from WebSocket message
+    epochs: List of epoch dictionaries (epochs[0] is current)
+    """
+    # Initialize state if needed
+    if 'my_data' not in epochs[0]:
+        epochs[0]['my_data'] = []
+
+    # Process and store data
+    epochs[0]['my_data'].append(process_data(data))
+```
+
+#### Reducers
+Aggregate epoch data into final field values:
+
+```python
+def custom_reducer(epochs):
+    """
+    epochs: List of epoch dictionaries
+    returns: Final value for the field
+    """
+    if not epochs or 'my_data' not in epochs[0]:
+        return None
+
+    return calculate_aggregate(epochs[0]['my_data'])
+```
+
+---
+
+## Web Scraping Ingesters
+
+### Static Scraper (`static_scrapper`)
+
+#### Overview
+Scrapes static web content using CSS selectors and XPath expressions. Uses BeautifulSoup and lxml for robust HTML parsing.
+
+#### Key Features
+- **CSS Selectors**: Standard CSS selector syntax via BeautifulSoup
+- **XPath Support**: Advanced element selection with lxml
+- **Caching**: Prevents redundant page fetches within intervals
+- **Parallel Processing**: Multi-threaded element extraction
+- **Encoding Handling**: Automatic character encoding detection
+
+#### Configuration Example
+
+```yaml
+static_scrapper:
+  - name: 'news_headlines'
+    interval: 'm15'
+    fields:
+      - name: 'crypto_news'
+        target: 'https://cryptonews.com'
+        selector: 'h2.article-title a'  # CSS selector
+        type: 'string'
+
+      - name: 'market_data'
+        target: 'https://coinmarketcap.com'
+        selector: '//span[@class="price"]'  # XPath selector
+        type: 'string'
+
+  - name: 'regulatory_updates'
+    interval: 'h1'
+    fields:
+      - name: 'sec_announcements'
+        target: 'https://www.sec.gov/news/pressreleases'
+        selector: '.list-item h4 a'
+```
+
+### Dynamic Scraper (`dynamic_scrapper`)
+
+#### Overview
+Browser automation for JavaScript-heavy sites using Playwright. Supports complex interactions, form filling, and dynamic content loading.
+
+#### Key Features
+- **Browser Automation**: Supports Chromium, Firefox, WebKit, and Edge
+- **Action Sequences**: Complex multi-step interactions
+- **Element Selection**: Multiple selector strategies (CSS, XPath, role, text, etc.)
+- **Viewport Management**: Configurable browser dimensions and mobile emulation
+- **JavaScript Execution**: Run custom JavaScript in browser context
+
+#### Configuration Example
+
+```yaml
+dynamic_scrapper:
+  - name: 'dashboard_data'
+    interval: 'm30'
+    fields:
+      - name: 'trading_volume'
+        target: 'https://dapp.example.com/dashboard'
+        selector: '[data-testid="volume"]'
+        actions:
+          - 'browser:use:chromium'
+          - 'page:goto:https://dapp.example.com'
+          - 'page:wait:3'
+          - 'page:click:.connect-wallet'
+          - 'page:wait_random:2:5'
+          - 'element:click'  # Click the volume element
+        type: 'float64'
+
+      - name: 'user_count'
+        target: 'https://analytics.example.com'
+        selector: '.user-stats'
+        actions:
+          - 'page:set_viewport_size:1920:1080'
+          - 'page:goto:https://analytics.example.com/login'
+          - 'page:fill:#username:myuser'
+          - 'page:fill:#password:mypass'
+          - 'page:click:button[type="submit"]'
+          - 'page:wait:5'
+          - 'page:goto:https://analytics.example.com/dashboard'
+```
+
+#### Available Actions
+
+##### Browser Actions
+- `browser:use:chromium|firefox|webkit|msedge`
+- `browser:close`
+
+##### Page Actions
+- `page:goto:URL`
+- `page:wait:seconds`
+- `page:wait_random:min_sec:max_sec`
+- `page:click:selector`
+- `page:fill:selector:text`
+- `page:set_viewport_size:width:height`
+- `page:evaluate:javascript_code`
+
+##### Element Actions
+- `element:click`
+- `element:hover`
+- `element:fill:text`
+- `element:type:text`
+- `element:scroll_to`
+
+##### Keyboard Actions
+- `keyboard:press:key`
+- `keyboard:type:text`
+
+---
+
+## FIX Protocol Ingester (`fix`) *(Work in Progress)*
+
+### Overview
+Low-level financial data integration using the Financial Information eXchange (FIX) protocol. Designed for high-frequency trading data and institutional financial feeds.
+
+### Planned Features
+- **FIX Session Management**: Automatic logon/logout and heartbeat handling
+- **Message Parsing**: Built-in FIX message dictionary and field extraction
+- **Handler Functions**: Similar to WebSocket ingester but for FIX messages
+- **Sequence Management**: Handle message ordering and gap detection
+- **Multi-Version Support**: FIX 4.0 through FIX 5.0 SP2
+
+### Expected Configuration *(Design Phase)*
+
+```yaml
+fix:
+  - name: 'market_data_feed'
+    target: 'fix://provider.com:9876'
+    interval: 's1'
+    session_config:
+      sender_comp_id: 'CHOMP_CLIENT'
+      target_comp_id: 'MARKET_DATA'
+      username: 'api_user'
+      password: 'api_password'
+    fields:
+      - name: 'bid_price'
+        message_type: 'MarketDataSnapshotFullRefresh'
+        selector: 'MDEntryPx'
+        filter: 'MDEntryType=0'  # Bid
+        handler: |
+          def handle_bid(message, epochs):
+            epochs[0]['bid'] = float(message.get('MDEntryPx'))
+        reducer: |
+          def latest_bid(epochs):
+            return epochs[0].get('bid') if epochs else None
+```
+
+## Common Configuration Patterns
+
+### Error Handling
+All Web2 ingesters support common error handling configuration:
+
+```yaml
+max_retries: 3
+retry_delay: 2.5
+timeout: 30.0
+```
+
+### Resource Monitoring
+Enable detailed performance tracking:
+
+```yaml
+monitor:
+  enabled: true
+  track_bandwidth: true
+  track_response_times: true
+  alert_threshold: 5000  # milliseconds
+```
+
+### Field Transformers
+Apply post-processing to extracted values:
+
+```yaml
+fields:
+  - name: 'normalized_price'
+    selector: '.price'
+    transformers:
+      - '{self} / 100'  # Convert cents to dollars
+      - 'round({self}, 2)'  # Round to 2 decimal places
+    type: 'float64'
+```
+
+## Performance Considerations
+
+### HTTP API Optimization
+- Use `pre_transformer` to reduce JSON parsing overhead
+- Configure appropriate `interval` to balance freshness vs. API limits
+- Leverage caching for expensive computations
+
+### WebSocket Optimization
+- Keep handler functions lightweight
+- Use efficient data structures in epoch state
+- Monitor memory usage with high-frequency streams
+
+### Scraping Best Practices
+- Prefer static scraping for content-only sites
+- Use dynamic scraping sparingly due to browser overhead
+- Implement appropriate delays to avoid being blocked
+- Cache page content when scraping multiple fields from same page
+
+## Dependencies
+
+### Required Packages
+- **HTTP**: `httpx` (always available)
+- **WebSocket**: `websockets` (always available)
+- **Static Scraping**: `beautifulsoup4`, `lxml`, `requests`
+- **Dynamic Scraping**: `playwright`
+- **FIX Protocol**: `quickfix` *(planned)*
+
+### Installation
+```bash
+# Core web ingesters (included by default)
+pip install chomp
+
+# Web scraping support
+pip install chomp[scraper]
+
+# Dynamic scraping (requires additional setup)
+pip install chomp[browser]
+playwright install chromium
+
+# FIX protocol support (planned)
+pip install chomp[fix]
+```

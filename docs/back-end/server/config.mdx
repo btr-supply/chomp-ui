@@ -1,0 +1,212 @@
+---
+title: 'Configuration Management System'
+description: 'Comprehensive configuration management system for Chomp with versioning, validation, and management capabilities for both ingester and server configurations.'
+category: 'Configuration'
+order: 7
+---
+
+# Configuration Management System
+
+This document describes the comprehensive configuration management system for Chomp, which provides versioning, validation, and management capabilities for both ingester and server configurations.
+
+## Overview
+
+The configuration management system has been completely refactored and separated into dedicated modules:
+
+- **Service**: `src/services/config.py` - Core configuration management logic
+- **Router**: `src/server/routers/config.py` - REST API endpoints
+- **Legacy Support**: Maintains backward compatibility with existing `/admin/config/*` endpoints
+
+## Architecture
+
+### Key Components
+
+1. **ConfigVersionManager**: Manages configuration versioning using diff-match-patch for efficient storage
+2. **Separate Config Types**: Supports both ingester and server configurations
+3. **Redis-based History**: Stores configuration diffs in Redis with timestamps
+4. **Validation Pipeline**: YAML validation and schema checking for both config types
+
+### Configuration Types
+
+#### Ingester Configuration
+- **Path**: Determined by `INGESTER_CONFIGS` environment variable or `ingesters.yml`
+- **Validation**: Uses `IngesterConfigProxy.load_config()` for schema validation
+- **History Key**: `config:history:ingester`
+
+#### Server Configuration
+- **Path**: Determined by `SERVER_CONFIG` environment variable or `server-config.yml`
+- **Validation**: Basic YAML syntax validation with extensible schema support
+- **History Key**: `config:history:server`
+
+## API Endpoints
+
+### New Dedicated Config Router (`/config`)
+
+#### Ingester Configuration
+- `GET /config/ingester` - Get current ingester configuration
+- `POST /config/ingester/validate` - Validate ingester configuration
+- `POST /config/ingester/update` - Update ingester configuration
+- `POST /config/ingester/upload` - Upload ingester configuration file
+- `GET /config/ingester/history` - Get ingester configuration history
+
+#### Server Configuration
+- `GET /config/server` - Get current server configuration
+- `POST /config/server/validate` - Validate server configuration
+- `POST /config/server/update` - Update server configuration
+- `POST /config/server/upload` - Upload server configuration file
+- `GET /config/server/history` - Get server configuration history
+
+#### Generic Operations
+- `POST /config/rollback` - Rollback to previous version (supports both types)
+- `GET /config/history` - Get combined history for both config types
+
+#### Legacy Endpoints (Backward Compatibility)
+- `GET /config/config` - Maps to ingester config (legacy)
+- `POST /config/config/validate` - Maps to ingester validation (legacy)
+- `POST /config/config/update` - Maps to ingester update (legacy)
+- `POST /config/config/upload` - Maps to ingester upload (legacy)
+- `GET /config/config/history` - Maps to ingester history (legacy)
+- `POST /config/config/rollback` - Maps to ingester rollback (legacy)
+
+### Admin Router Changes
+
+The `/admin/config/*` endpoints have been **removed** and replaced with a note redirecting to the new `/config` router. This separation provides:
+
+- **Cleaner Architecture**: Configuration management is now isolated
+- **Better Organization**: Config operations are separate from admin operations
+- **Enhanced Features**: More comprehensive configuration management
+- **Backward Compatibility**: Legacy endpoints still work
+
+## Core Functions
+
+### Service Functions (`src/services/config.py`)
+
+#### Ingester Configuration
+```python
+async def get_current_ingester_config() -> ServiceResponse[str]
+async def validate_ingester_config(config_content: str) -> ServiceResponse[dict[str, Any]]
+async def update_ingester_config(config_content: str) -> ServiceResponse[dict[str, Any]]
+```
+
+#### Server Configuration
+```python
+async def get_current_server_config() -> ServiceResponse[str]
+async def validate_server_config(config_content: str) -> ServiceResponse[dict[str, Any]]
+async def update_server_config(config_content: str) -> ServiceResponse[dict[str, Any]]
+```
+
+#### Generic Operations
+```python
+async def get_config_history(limit: int, config_type: str) -> ServiceResponse[list[dict[str, Any]]]
+async def rollback_config(steps_back: int, config_type: str) -> ServiceResponse[dict[str, Any]]
+```
+
+#### Legacy Functions (Backward Compatibility)
+```python
+async def get_current_config() -> ServiceResponse[str]  # Maps to ingester
+async def validate_config(config_content: str) -> ServiceResponse[dict[str, Any]]  # Maps to ingester
+async def update_config(config_content: str) -> ServiceResponse[dict[str, Any]]  # Maps to ingester
+```
+
+## Versioning System
+
+### Diff-Match-Patch Integration
+
+- **Efficient Storage**: Only differences between versions are stored
+- **Reconstruction**: Previous versions can be reconstructed by applying patches backwards
+- **History Limit**: Configurable limit (default: 50 versions) to prevent unlimited growth
+- **Timestamps**: Each version includes creation timestamp
+
+### History Format
+
+```json
+{
+  "version": 1,
+  "timestamp": "2024-01-15T10:30:00Z",
+  "steps_back": 1
+}
+```
+
+### Rollback Process
+
+1. **Validation**: Target version is reconstructed and validated
+2. **Safety Check**: Ensures rolled-back configuration is valid
+3. **Application**: Configuration is applied and new diff is created
+4. **Notification**: Returns affected ingesters/services
+
+## Configuration Workflow
+
+### Standard Update Process
+
+1. **Upload/Edit**: Configuration content is provided
+2. **Validation**: YAML syntax and schema validation
+3. **Diff Creation**: Changes are computed using diff-match-patch
+4. **Storage**: New configuration is written to file
+5. **History Update**: Diff is stored in Redis with timestamp
+6. **Response**: Success confirmation with affected components
+
+### File Locations
+
+- **Ingester Config**: Determined by `INGESTER_CONFIGS` environment variable
+- **Server Config**: Determined by `SERVER_CONFIG` environment variable
+- **History Storage**: Redis keys `config:history:ingester` and `config:history:server`
+
+## Request/Response Models
+
+### ConfigUpdateRequest
+```python
+class ConfigUpdateRequest(BaseModel):
+    config_content: str
+    validate_only: bool = False
+    restart_affected: bool = True
+```
+
+### ConfigRollbackRequest
+```python
+class ConfigRollbackRequest(BaseModel):
+    steps_back: int
+    config_type: str = "ingester"  # "ingester" or "server"
+```
+
+## Migration Notes
+
+### From Admin Router
+
+- **Endpoints Moved**: All `/admin/config/*` endpoints moved to `/config/*`
+- **Service Functions**: Configuration functions moved from `admin.py` to `config.py`
+- **Legacy Support**: Old endpoints still work via legacy mapping functions
+
+### Enhanced Features
+
+- **Dual Configuration Support**: Both ingester and server configurations
+- **Improved Validation**: Type-specific validation logic
+- **Better Organization**: Dedicated router and service modules
+- **Enhanced History**: Separate history tracking for each config type
+
+## Error Handling
+
+- **Validation Errors**: Detailed error messages with line numbers when possible
+- **File Access Errors**: Clear messages when configuration files are not accessible
+- **History Errors**: Graceful handling of Redis connectivity issues
+- **Rollback Errors**: Safety checks prevent invalid rollbacks
+
+## Security Considerations
+
+- **File Permissions**: Configuration files should be properly secured
+- **Redis Access**: History data in Redis should be protected
+- **Validation**: All configuration changes go through validation pipeline
+- **Backup**: Original configurations are preserved in version history
+
+## Performance
+
+- **Efficient Diffs**: Only changes are stored, not full configurations
+- **Redis Caching**: Fast access to version history
+- **Lazy Loading**: Configurations loaded only when needed
+- **Optimized Validation**: Minimal temporary file usage
+
+## Monitoring
+
+- **History Tracking**: All changes are logged with timestamps
+- **Affected Components**: Each update reports which services/ingesters are affected
+- **Validation Metrics**: Track validation success/failure rates
+- **Usage Analytics**: Monitor which configuration operations are most common

@@ -1,0 +1,14 @@
+# Target browsers covering ~90% of users while minimizing polyfills
+# These browsers support most modern JS features, reducing polyfill needs
+> 0.5%
+last 2 versions
+not dead
+not ie <= 11
+not op_mini all
+chrome >= 88
+firefox >= 87
+safari >= 14
+edge >= 88
+ios_saf >= 14
+android >= 88
+samsung >= 15

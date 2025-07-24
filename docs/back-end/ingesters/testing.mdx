@@ -1,0 +1,547 @@
+---
+title: 'Ingester Testing Guide'
+description: 'Testing strategies for web2 and web3 data ingesters'
+category: 'Ingesters'
+order: 7
+---
+
+# Ingester Testing Guide
+
+## Overview
+
+Ingester testing in Chomp focuses on **real data sources**, **blockchain connections**, and **live API endpoints** without mocking. Tests automatically skip when dependencies or external services are unavailable.
+
+<div className="bg-green-50 border-l-4 border-green-400 p-4 my-6">
+
+**Key Philosophy**: Test with real data sources and blockchain networks to validate actual data ingestion.
+
+</div>
+
+## Data Ingester Categories
+
+### Web2 Ingesters
+
+<div className="grid grid-cols-1 md:grid-cols-2 gap-4 my-6">
+
+<div className="p-4 border rounded-lg">
+**HTTP-based Ingesters**
+- `test_ingesters_http_api.py` - REST API data sources
+- `test_ingesters_ws_api.py` - WebSocket streams
+- `test_ingesters_dynamic_scrapper.py` - Browser automation (requires `playwright`)
+</div>
+
+<div className="p-4 border rounded-lg">
+**Processing & Transformation**
+- `test_ingesters_processor.py` - Data transformation
+- `test_processors.py` - Processing pipelines
+</div>
+
+</div>
+
+### Web3 Ingesters
+
+<div className="grid grid-cols-1 md:grid-cols-2 gap-4 my-6">
+
+<div className="p-4 border rounded-lg">
+**EVM Blockchain**
+- `test_ingesters_evm_caller.py` - Smart contract calls (requires `web3`, `multicall`)
+- `test_ingesters_evm_logger.py` - Event log monitoring (requires `web3`)
+</div>
+
+<div className="p-4 border rounded-lg">
+**Other Blockchains**
+- `test_ingesters_sui_caller.py` - Sui blockchain calls
+- `test_ingesters_svm_logger.py` - Solana transaction logs (TODO implementation)
+</div>
+
+</div>
+
+### Additional Ingester Tests
+- `test_ingesters.py` - General ingester functionality
+
+## Web2 Ingester Testing
+
+### Dynamic Scraper Testing
+```bash
+# Requires: playwright
+pytest tests/test_ingesters_dynamic_scrapper.py
+```
+
+**Dependencies**: `playwright` for browser automation
+
+```python
+from src.deps import safe_import
+
+playwright = safe_import("playwright")
+PLAYWRIGHT_AVAILABLE = playwright is not None
+
+@pytest.mark.skipif(not PLAYWRIGHT_AVAILABLE, reason="Playwright dependencies not available (playwright)")
+class TestPuppet:
+    def test_page_scraping(self):
+        puppet = Puppet(mock_field, mock_ingester, mock_playwright)
+        assert isinstance(puppet, Puppet)
+```
+
+### HTTP API Testing
+```bash
+# No external dependencies required
+pytest tests/test_ingesters_http_api.py
+```
+
+```python
+class TestHttpApiIngester:
+    def test_api_request(self):
+        ingester = HttpApiIngester({
+            "url": "https://api.example.com/data",
+            "headers": {"Accept": "application/json"}
+        })
+
+        data = ingester.fetch_data()
+        assert "data" in data
+        assert isinstance(data["data"], list)
+```
+
+### WebSocket API Testing
+```bash
+# No external dependencies required
+pytest tests/test_ingesters_ws_api.py
+```
+
+```python
+class TestWebSocketIngester:
+    def test_websocket_connection(self):
+        ingester = WebSocketIngester({
+            "url": "wss://api.example.com/stream",
+            "subscribe": {"type": "subscribe", "channels": ["trades"]}
+        })
+
+        # Test connection and initial data
+        ingester.connect()
+        data = ingester.receive_message()
+        assert data is not None
+        ingester.disconnect()
+```
+
+## Web3 Ingester Testing
+
+### EVM Caller Testing
+```bash
+# Requires: web3, multicall
+pytest tests/test_ingesters_evm_caller.py
+```
+
+**Dependencies**: `web3`, `multicall` for blockchain interaction
+
+```python
+from src.deps import safe_import
+
+web3 = safe_import("web3")
+multicall = safe_import("multicall")
+EVM_AVAILABLE = all([web3 is not None, multicall is not None])
+
+@pytest.mark.skipif(not EVM_AVAILABLE, reason="EVM dependencies not available (web3, multicall)")
+class TestEVMCaller:
+    def test_contract_call(self):
+        # Test actual EVM caller functionality
+        result = parse_generic({"key": "value", "number": 123})
+        assert result == {"key": "value", "number": 123}
+
+    @pytest.mark.asyncio
+    async def test_schedule_basic_functionality(self):
+        # Test basic schedule functionality with mocked ingester
+        mock_ingester = Mock(spec=Ingester)
+        mock_ingester.name = "test_evm_caller"
+
+        result = await schedule(mock_ingester)
+        assert result is not None
+```
+
+### EVM Logger Testing
+```bash
+# Requires: web3
+pytest tests/test_ingesters_evm_logger.py
+```
+
+```python
+from src.deps import safe_import
+
+web3 = safe_import("web3")
+WEB3_AVAILABLE = web3 is not None
+
+@pytest.mark.skipif(not WEB3_AVAILABLE, reason="Web3 dependencies not available")
+class TestEvmLogger:
+    def test_event_logging(self):
+        logger = EvmLogger({
+            "rpc_url": "https://rpc.ankr.com/eth",
+            "contract_address": "0x...",
+            "event": "Transfer",
+            "from_block": "latest"
+        })
+
+        events = logger.get_logs()
+        assert isinstance(events, list)
+```
+
+### SVM (Solana) Testing
+```bash
+# No external dependencies required (but TODO implementation)
+pytest tests/test_ingesters_svm_logger.py
+```
+
+**Note**: SVM logger is currently marked as TODO in the codebase.
+
+```python
+class TestSvmLogger:
+    def test_svm_logger_module_exists(self):
+        """Test that the SVM logger module can be imported."""
+        try:
+            import src.ingesters.svm_logger
+            assert src.ingesters.svm_logger is not None
+        except ImportError:
+            pytest.fail("Could not import svm_logger module")
+
+    def test_svm_logger_is_todo(self):
+        """Test that the SVM logger is marked as TODO."""
+        from src.ingesters import svm_logger
+
+        # Read the module file content to check for TODO
+        import inspect
+        module_source = inspect.getsource(svm_logger)
+        assert "TODO" in module_source or "# TODO" in module_source
+
+    @pytest.mark.skip(reason="SVM logger is not yet implemented (TODO)")
+    def test_svm_logger_schedule_when_implemented(self):
+        """Placeholder test for when SVM logger is implemented."""
+        pass
+```
+
+### Sui Blockchain Testing
+```bash
+# No external dependencies required
+pytest tests/test_ingesters_sui_caller.py
+```
+
+```python
+class TestSuiCaller:
+    def test_program_call(self):
+        caller = SuiCaller({
+            "rpc_url": "https://fullnode.mainnet.sui.io:443",
+            "program_id": "...",
+            "method": "getObjectInfo"
+        })
+
+        result = caller.call_program()
+        assert result is not None
+```
+
+## Installing Ingester Dependencies
+
+### Web2 Dependencies
+```bash
+# Browser automation
+pip install playwright && playwright install
+
+# HTTP/WebSocket (no additional dependencies)
+# Built-in with Python requests and websockets
+```
+
+### Web3 Dependencies
+```bash
+# Ethereum and EVM chains
+pip install web3 multicall
+
+# NB: eth-utils, hexbytes, eth-account are used by EVM RPC adapter
+pip install eth-utils hexbytes eth-account
+
+# Solana/Sui (currently no additional libraries needed for basic functionality)
+```
+
+## Writing New Ingester Tests
+
+### Pattern for Web2 Ingester
+```python
+class TestNewHttpIngester:
+    def test_data_fetching(self):
+        ingester = NewHttpIngester({
+            "url": "https://api.newservice.com/data",
+            "api_key": "test_key"
+        })
+
+        data = ingester.fetch()
+        assert data is not None
+        assert "timestamp" in data
+        assert "value" in data
+
+    def test_error_handling(self):
+        ingester = NewHttpIngester({
+            "url": "https://invalid-url.com/data"
+        })
+
+        with pytest.raises(ConnectionError):
+            ingester.fetch()
+```
+
+### Pattern for Web3 Ingester
+```python
+from src.deps import safe_import
+
+web3_lib = safe_import("web3")
+WEB3_AVAILABLE = web3_lib is not None
+
+@pytest.mark.skipif(not WEB3_AVAILABLE, reason="Web3 not available")
+class TestNewBlockchainIngester:
+    def test_blockchain_call(self):
+        ingester = NewBlockchainIngester({
+            "rpc_url": "https://rpc.newchain.com",
+            "contract": "0x..."
+        })
+
+        result = ingester.call_contract()
+        assert result is not None
+        assert "block_number" in result
+
+    @pytest.mark.asyncio
+    async def test_network_switching(self):
+        """Test handling multiple blockchain networks."""
+        ingester = NewBlockchainIngester()
+
+        # Test different networks
+        mainnet_data = await ingester.call(network="mainnet")
+        testnet_data = await ingester.call(network="testnet")
+
+        assert mainnet_data != testnet_data
+```
+
+## Data Processor Testing
+
+### Processor Pipeline Testing
+```python
+class TestDataProcessor:
+    def test_transformation(self):
+        processor = DataProcessor([
+            {"type": "filter", "condition": "value > 0"},
+            {"type": "normalize", "field": "price"},
+            {"type": "aggregate", "method": "mean", "window": "1h"}
+        ])
+
+        input_data = [
+            {"timestamp": "2024-01-01T00:00:00Z", "price": 100},
+            {"timestamp": "2024-01-01T00:01:00Z", "price": 150}
+        ]
+
+        result = processor.process(input_data)
+        assert len(result) > 0
+        assert "normalized_price" in result[0]
+```
+
+### Real-time Processing Testing
+```python
+class TestRealtimeProcessor:
+    def test_streaming_processing(self):
+        processor = RealtimeProcessor()
+
+        # Simulate streaming data
+        for i in range(100):
+            data_point = {"timestamp": time.time(), "value": i}
+            result = processor.process_realtime(data_point)
+
+            if result:  # Only process when window is complete
+                assert "processed_value" in result
+                assert result["processed_value"] is not None
+```
+
+## Running Ingester Tests
+
+### Primary Method
+```bash
+# Run all ingester tests
+make test
+
+# Run specific categories
+pytest tests/test_ingesters_*.py
+pytest tests/test_processors*.py
+```
+
+### Category-specific Testing
+```bash
+# Web2 ingesters
+pytest tests/test_ingesters_http_api.py
+pytest tests/test_ingesters_ws_api.py
+pytest tests/test_ingesters_dynamic_scrapper.py
+
+# Web3 ingesters
+pytest tests/test_ingesters_evm_caller.py
+pytest tests/test_ingesters_evm_logger.py
+pytest tests/test_ingesters_sui_caller.py
+
+# Data processing
+pytest tests/test_ingesters_processor.py
+pytest tests/test_processors.py
+```
+
+## Expected Output Examples
+
+### With Dependencies Available
+```
+tests/test_ingesters_dynamic_scrapper.py .... PASSED
+tests/test_ingesters_evm_caller.py ......... PASSED
+tests/test_ingesters_http_api.py ........... PASSED
+tests/test_ingesters_sui_caller.py ......... PASSED
+```
+
+### With Dependencies Missing
+```
+tests/test_ingesters_dynamic_scrapper.py .... SKIPPED (Playwright not available)
+tests/test_ingesters_evm_caller.py ......... SKIPPED (EVM dependencies not available)
+tests/test_ingesters_http_api.py ........... PASSED
+tests/test_ingesters_svm_logger.py ......... PASSED (includes TODO tests)
+```
+
+## Real Test Examples from Codebase
+
+### Playwright Browser Automation
+```python
+@pytest.mark.asyncio
+async def test_ensure_browser_new(self):
+    """Test ensuring browser when none exists."""
+    puppet = Puppet(self.mock_field, self.mock_ingester, self.mock_playwright)
+
+    browser = await puppet.ensure_browser()
+
+    assert browser == self.mock_browser
+    self.mock_playwright.__getitem__.assert_called_with("chromium")
+```
+
+### EVM Multicall Testing
+```python
+@pytest.mark.asyncio
+async def test_schedule_multiple_chains(self):
+    """Test schedule with fields from multiple chains."""
+    mock_ingester = Mock(spec=Ingester)
+    mock_ingester.name = "test_evm_caller"
+
+    # Create mock fields for different chains (ETH, BSC)
+    mock_field1.chain_addr = Mock(return_value=("ETH", "0x1234..."))
+    mock_field2.chain_addr = Mock(return_value=("BSC", "0xabcd..."))
+
+    mock_ingester.fields = [mock_field1, mock_field2]
+
+    result = await schedule(mock_ingester)
+    assert result is not None
+```
+
+## Performance Testing
+
+### Ingestion Rate Testing
+```python
+def test_ingestion_performance(self):
+    ingester = HighVolumeIngester()
+
+    start_time = time.time()
+    data_points = ingester.ingest_batch(size=1000)
+    elapsed = time.time() - start_time
+
+    # Should process 1000 data points in reasonable time
+    assert len(data_points) == 1000
+    assert elapsed < 10.0  # Under 10 seconds
+
+    # Calculate ingestion rate
+    rate = len(data_points) / elapsed
+    assert rate > 100  # At least 100 points per second
+```
+
+### Memory Usage Testing
+```python
+def test_memory_efficiency(self):
+    import psutil
+    import os
+
+    process = psutil.Process(os.getpid())
+    initial_memory = process.memory_info().rss
+
+    ingester = StreamingIngester()
+
+    # Process large amount of data
+    for _ in range(10000):
+        ingester.process_data_point({"value": random.random()})
+
+    final_memory = process.memory_info().rss
+    memory_increase = final_memory - initial_memory
+
+    # Memory usage should not grow excessively
+    assert memory_increase < 100 * 1024 * 1024  # Less than 100MB increase
+```
+
+## Configuration Testing
+
+### Ingester Configuration Validation
+```python
+def test_config_validation(self):
+    # Valid configuration
+    valid_config = {
+        "url": "https://api.example.com",
+        "interval": 60,
+        "retry_count": 3
+    }
+
+    ingester = ConfigurableIngester(valid_config)
+    assert ingester.validate_config()
+
+    # Invalid configuration
+    invalid_config = {
+        "url": "invalid-url",
+        "interval": -1
+    }
+
+    with pytest.raises(ValueError):
+        ConfigurableIngester(invalid_config)
+```
+
+## Troubleshooting
+
+### Common Issues
+
+**External Service Unavailability**
+- Network connectivity issues
+- API rate limiting or authentication
+- Service maintenance or outages
+
+**Blockchain Connection Problems**
+- RPC endpoint failures
+- Network congestion
+- Gas estimation errors
+
+**Browser Automation Issues**
+- Missing browser dependencies (`playwright install`)
+- Headless mode compatibility
+- Website blocking automation
+
+**Dependency Resolution**
+- Package installation failures
+- Version compatibility issues
+- Platform-specific requirements
+
+**TODO Implementation Status**
+- SVM logger is marked as TODO and not fully implemented
+- Tests exist but are mostly placeholders
+- Contribution opportunities available
+
+## Key Benefits
+
+<div className="grid grid-cols-1 md:grid-cols-2 gap-6 my-6">
+
+<div className="p-4 border rounded-lg">
+**Real Data Sources**
+- Tests actual API responses
+- Validates data format consistency
+- Catches external service changes
+</div>
+
+<div className="p-4 border rounded-lg">
+**Blockchain Integration**
+- Tests real network calls
+- Validates contract interactions
+- Ensures chain compatibility
+</div>
+
+</div>

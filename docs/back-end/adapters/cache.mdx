@@ -1,0 +1,297 @@
+---
+title: 'Cache System'
+description: "Chomp's Redis-based caching and coordination system for distributed operations"
+category: 'Data Layer'
+order: 7
+---
+
+# Cache System
+
+Chomp's Redis-based caching and coordination system for distributed operations.
+
+## Overview
+
+Redis serves as the primary cache and coordination mechanism, handling multiple critical functions:
+
+<div className="grid grid-cols-1 md:grid-cols-3 gap-4 my-6">
+
+<div className="p-4 border rounded-lg text-center">
+
+**Task Coordination**
+Distributed locking and job claims
+
+</div>
+
+<div className="p-4 border rounded-lg text-center">
+
+**Data Caching**
+High-speed data access and pubsub messaging
+
+</div>
+
+<div className="p-4 border rounded-lg text-center">
+
+**Session Management**
+Rate limiting and user sessions
+
+</div>
+
+</div>
+
+## Core Implementation (`src/cache.py`)
+
+### Key Functions
+
+<div className="grid grid-cols-1 md:grid-cols-2 gap-4 my-4">
+
+<div className="p-4 bg-blue-50 rounded-lg">
+
+**Task Coordination**
+
+- `claim_task()` - Claim distributed jobs
+- `is_task_claimed()` - Check task ownership
+- `ensure_claim_task()` - Atomic task claiming
+
+</div>
+
+<div className="p-4 bg-green-50 rounded-lg">
+
+**Caching Operations**
+
+- `cache()` - Store data with TTL
+- `get_cache()` - Retrieve cached data
+- `cache_batch()` - Batch operations
+
+</div>
+
+<div className="p-4 bg-yellow-50 rounded-lg">
+
+**Messaging**
+
+- `pub()` - Publish messages
+- `sub()` - Subscribe to channels
+
+</div>
+
+<div className="p-4 bg-purple-50 rounded-lg">
+
+**Registry Management**
+
+- `register_ingester()` - Register new ingesters
+- `get_registered_ingesters()` - List active ingesters
+
+</div>
+
+</div>
+
+### Key Namespacing
+
+Uses `REDIS_NS` environment variable (default: `"chomp"`) with structured patterns:
+
+<div className="bg-gray-50 p-4 rounded-lg my-4">
+
+```
+chomp:claims:{ingester_id}    # Task ownership tracking
+chomp:cache:{name}            # General purpose caching
+chomp:ingesters:{name}        # Ingester registry
+chomp:locks:ingesters         # Registry coordination locks
+```
+
+</div>
+
+## Configuration
+
+### Environment Variables
+
+<div className="bg-gray-50 p-4 rounded-lg my-4">
+
+```bash
+REDIS_NS=chomp           # Namespace prefix
+REDIS_HOST=localhost     # Redis server host
+REDIS_PORT=40001        # Redis server port
+REDIS_DB=0              # Redis database number
+REDIS_MAX_CONNECTIONS=65536  # Connection pool size
+```
+
+</div>
+
+### Connection Management
+
+<div className="bg-blue-50 p-4 rounded-lg my-4">
+
+Redis connection is managed through `src/proxies.py` with:
+
+- Connection pooling for performance
+- Automatic reconnection on failures
+- Thread-safe operations
+- Resource cleanup on shutdown
+
+</div>
+
+## Task Coordination
+
+### Distributed Locking
+
+<div className="space-y-4 my-4">
+
+<div className="flex items-center space-x-4 p-3 bg-gray-50 rounded">
+  <div className="w-8 h-8 bg-blue-500 text-white rounded-full flex items-center justify-center text-sm font-bold">
+    1
+  </div>
+  <div>
+    <h4 className="font-semibold">Atomic Claims</h4>
+    <p className="text-sm text-gray-600">
+      Uses Redis SETEX with NX flag for race-free task claiming
+    </p>
+  </div>
+</div>
+
+<div className="flex items-center space-x-4 p-3 bg-gray-50 rounded">
+  <div className="w-8 h-8 bg-blue-500 text-white rounded-full flex items-center justify-center text-sm font-bold">
+    2
+  </div>
+  <div>
+    <h4 className="font-semibold">Automatic Expiration</h4>
+    <p className="text-sm text-gray-600">Claims expire based on ingester intervals</p>
+  </div>
+</div>
+
+<div className="flex items-center space-x-4 p-3 bg-gray-50 rounded">
+  <div className="w-8 h-8 bg-blue-500 text-white rounded-full flex items-center justify-center text-sm font-bold">
+    3
+  </div>
+  <div>
+    <h4 className="font-semibold">Registry Locks</h4>
+    <p className="text-sm text-gray-600">Prevent race conditions during ingester registration</p>
+  </div>
+</div>
+
+</div>
+
+### Clustering Support
+
+<div className="grid grid-cols-1 md:grid-cols-2 gap-4 my-4">
+
+<div className="p-4 border-l-4 border-green-500">
+
+**Process Identification**
+Each instance identified by unique `proc_id`
+
+**Probabilistic Execution**
+Tasks can be configured with probability thresholds
+
+</div>
+
+<div className="p-4 border-l-4 border-blue-500">
+
+**Heartbeat Monitoring**
+Track task health and execution status
+
+**Load Balancing**
+Automatic distribution across available instances
+
+</div>
+
+</div>
+
+## Data Management
+
+### Caching Strategies
+
+<div className="space-y-3 my-4">
+
+- **General Purpose Caching**: Configurable TTL for any data type
+- **Batch Operations**: High-performance bulk operations
+- **Pickle Support**: Complex Python objects with full serialization
+- **Registry Caching**: Ingester configurations and metadata
+
+</div>
+
+### Ingester Registry
+
+<div className="bg-green-50 border-l-4 border-green-400 p-4 my-4">
+
+**Features**:
+
+- Centralized registry of all active ingesters
+- Scope-based serialization (see `src/model.py` Scope enum)
+- Hot-reloading of configurations without restart
+- Cross-ingester dependency resolution
+
+</div>
+
+## Performance Features
+
+<div className="grid grid-cols-1 md:grid-cols-2 gap-4 my-4">
+
+<div className="p-4 bg-gray-50 rounded">
+
+**Connection Optimization**
+
+- Connection pooling through Redis proxy
+- Configurable pool sizes
+- Resource cleanup and monitoring
+
+</div>
+
+<div className="p-4 bg-gray-50 rounded">
+
+**Operation Efficiency**
+
+- Batch operations with Redis pipelines
+- Configurable TTL per cache operation
+- Memory-efficient serialization options
+
+</div>
+
+</div>
+
+## Usage Examples
+
+### Basic Caching
+
+<div className="bg-gray-50 p-4 rounded-lg my-4">
+
+```python
+from src.cache import cache, get_cache
+
+# Store data with TTL
+cache("user_session", {"user_id": 123, "active": True}, ttl=3600)
+
+# Retrieve cached data
+session_data = get_cache("user_session")
+```
+
+</div>
+
+### Task Coordination
+
+<div className="bg-gray-50 p-4 rounded-lg my-4">
+
+```python
+from src.cache import ensure_claim_task
+
+# Claim a task for distributed processing
+ingester_id = "price_feed_btc"
+if ensure_claim_task(ingester_id):
+    # Process the task
+    process_ingester(ingester_id)
+else:
+    # Task already claimed by another instance
+    pass
+```
+
+</div>
+
+## Monitoring & Debugging
+
+<div className="bg-yellow-50 border-l-4 border-yellow-400 p-4 my-4">
+
+**Redis Monitoring**: Use Redis CLI or monitoring tools to inspect:
+
+- Active task claims
+- Cache hit rates
+- Registry contents
+- Connection pool status
+
+</div>

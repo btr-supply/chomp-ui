@@ -1,0 +1,31 @@
+[install]
+# Use exact versions for reproducible installs
+exact = true
+
+# Disable peer dependency warnings for cleaner output
+peer = false
+
+# Cache directory configuration
+cache = "~/.bun/install/cache"
+
+# Enable automatic dependency deduplication
+dedupe = true
+
+# Use hardlinks when possible for faster installs
+hardlink = true
+
+[install.scopes]
+# Configure scoped packages if needed
+"@types" = { registry = "https://registry.npmjs.org/" }
+
+[run]
+# Automatically install missing dependencies
+auto-install = true
+
+# Enable bun shell for better cross-platform compatibility
+shell = "bun"
+
+[test]
+# Use bun's built-in test runner
+runner = "bun"
+coverage = true

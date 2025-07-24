@@ -1,0 +1,32 @@
+# Dependencies
+node_modules/
+bun.lock
+
+# Build outputs
+.next/
+dist/
+build/
+
+# Generated files
+*.tsbuildinfo
+*.map
+
+# Logs
+*.log
+
+# Bun cache and global directories
+~/.bun/
+.bun/
+bun.lockb
+
+# System and editor files
+.DS_Store
+.vscode/
+.idea/
+.cursor/
+*.swp
+*.swo
+
+# Documentation (if we don't want to format certain docs)
+docs/
+specs/

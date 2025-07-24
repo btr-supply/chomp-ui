@@ -1,0 +1,203 @@
+# Chomp Frontend Architecture
+
+This document outlines the architecture of the Chomp frontend application - a web interface for configuring and monitoring Chomp deployments.
+
+## 1. Overview
+
+The Chomp frontend is a **backend-independent web interface** that provides no-code configuration and monitoring for any Chomp deployment. It can be accessed via **https://cho.mp** or self-hosted.
+
+### Core Principle: Backend Independence
+
+The frontend connects to any Chomp backend through its API:
+- **Local development** (localhost:40004)
+- **Self-hosted deployments**
+- **Public cloud instances**
+
+This enables:
+- Zero frontend deployment for users
+- Compatibility with any Chomp version
+- Seamless backend switching
+
+### Backend Performance Foundation
+
+Chomp's lightweight and high-speed capabilities are built on:
+- **Redis**: Caching, real-time streaming, and cluster coordination
+- **TDengine**: High-compression, high-speed time-series storage (replaceable with TimescaleDB, InfluxDB, QuestDB)
+
+### Scaling Architecture
+- **Vertical Scaling**: Decent configurations can handle hundreds of millions of data points per day
+- **Horizontal Scaling**: Nodes automatically sync via cluster Redis, preventing resource competition
+
+## 2. User Journey
+
+### 2.1. Entry Points
+**Landing Page**: https://cho.mp
+
+**Three Actions**:
+1. **Deploy** → `/docs/back-end/deployment`
+2. **Explore** → `/directory`
+3. **Login** → `/directory?to=login`
+
+### 2.2. Backend Selection
+**Directory Page**: `/directory`
+- **Public Clusters**: From directory.json
+- **Custom Backends**: User-added instances
+- **Local Development**: Default localhost:40004
+- **Health Status**: Real-time backend monitoring
+
+### 2.3. Authentication
+**Dynamic Authentication**: `/login/{cluster-slug}`
+- **Method Discovery**: `GET {backend-url}/auth/methods`
+- **Supported Methods**: Static tokens, Web3 wallets, OAuth2
+- **OAuth2 Limitation**: Not available on cho.mp due to callback URL requirements
+
+### 2.4. Data Access
+**Schema Discovery**: `/schema/{cluster-slug}`
+- **Public Resources**: Visible to all users
+- **Protected Resources**: Visible to authenticated admins
+- **Caching**: 15-minute cache via TanStack Query
+
+**Resource Interaction**: `/resource/{cluster-slug}/{resource-name}`
+- **Update Resources**: Paginated objects sorted by updated_at
+- **Timeseries Resources**: Charts, tables, and historical data
+
+## 3. Backend Discovery
+
+### 3.1. Directory System
+**Source**: `directory.json` from the main repository
+
+**Structure**:
+```json
+{
+  "list": [
+    {
+      "name": "BTR Markets",
+      "description": "Market data aggregation",
+      "url": "https://api.btr.markets",
+      "logo": "https://cdn.btr.supply/assets/images/icons/btr-markets.svg"
+    }
+  ]
+}
+```
+
+### 3.2. Custom Backends
+- **Storage**: Browser localStorage
+- **Features**: Add/edit/remove backends, health monitoring
+- **Persistence**: Saved across browser sessions
+
+## 4. Authentication
+
+### 4.1. Method Discovery
+**Endpoint**: `GET {backend-url}/auth/methods`
+
+**Response**:
+```json
+{
+  "available_methods": ["static", "evm", "svm", "sui", "oauth2_github"],
+  "oauth2_providers": {
+    "github": true
+  }
+}
+```
+
+### 4.2. OAuth2 Limitations
+OAuth2 requires fixed callback URLs, making it incompatible with cho.mp's dynamic backend connections. It works on self-hosted deployments where the frontend domain is known.
+
+### 4.3. Token Management
+- **Per-Backend Storage**: Isolated by backend URL
+- **JWT Sessions**: Standard JWT tokens
+- **Validation**: Regular `/auth/status` checks
+
+## 5. Data Architecture
+
+### 5.1. Resource Types
+
+**Update Resources**: Paginated objects (users, configs, logs)
+- API: `GET {backend-url}/list/{resource}?limit=100&offset=0`
+
+**Timeseries Resources**: Time-based data (metrics, feeds)
+- Current: `GET {backend-url}/last?resources={resource-list}`
+- Historical: `GET {backend-url}/history?resources={resource-list}&interval=m15`
+
+### 5.2. Data Visualization
+- **Charts**: Multi-line charts with field selection
+- **Tables**: Timestamp-sorted data points
+- **Export**: Data export for visible ranges
+
+### 5.3. Performance Characteristics
+The frontend efficiently handles high-throughput data from backends that can:
+- Process millions of data points per day on low-end hardware (hundreds of millions with decent hardware)
+- Scale vertically and horizontally via Redis cluster coordination
+- Provide high-speed data retrieval through TDengine's compression and optimization
+
+## 6. Admin Interface
+
+### 6.1. Route Structure
+- `/admin/{cluster-slug}` - Dashboard
+- `/admin/{cluster-slug}/schema` - Resource discovery and monitoring data
+- `/admin/{cluster-slug}/config` - Configuration editing
+- `/admin/{cluster-slug}/users` - User management
+- `/admin/{cluster-slug}/monitoring` - System monitoring overview
+- `/admin/{cluster-slug}/monitoring/instances` - Redirects to schema with instance monitoring filter
+- `/admin/{cluster-slug}/monitoring/resources` - Redirects to schema with resource monitoring filter
+
+### 6.2. Simplified Monitoring Architecture
+**Schema-Integrated Monitoring**: Instead of dedicated monitoring pages, the system leverages the schema discovery infrastructure:
+- **Instance Monitoring**: Accessed via `/schema/{cluster-slug}?filter=sys\..*\.ins\.monitor`
+- **Resource Monitoring**: Accessed via `/schema/{cluster-slug}?filter=sys\..*\.ing\.monitor`
+- **Protected Resources**: Monitoring resources are protected and accessible only to authenticated users
+- **Unified Interface**: Same table and visualization tools used for all resource types including monitoring
+
+### 6.2. Configuration Management
+**YAML Editing**: WYSIWYG editing using Eemeli Aro's YAML library (best for preserving anchors and round-trip editing) or raw file editing with Prism editor
+
+**Features**:
+- Inheritance support (WYSIWYG mode)
+- Real-time validation
+- "Try" button for testing configurations
+- Live preview capabilities
+
+## 7. Technical Stack
+
+### 7.1. Core Technologies
+- **Framework**: Next.js 14+ (App Router)
+- **Language**: TypeScript (strict mode)
+- **UI Library**: MUI (Material-UI)
+- **State Management**: Zustand (client), TanStack Query (server)
+- **Deployment**: Static site generation
+
+### 7.2. Performance Features
+- **Code Splitting**: Route-based lazy loading
+- **Caching**: 15-minute schema cache, per-backend isolation
+- **Memoization**: React.memo for expensive components
+- **Bundle Optimization**: Tree-shaking, selective imports
+
+### 7.3. UI Components
+- **Prism Editor**: Raw YAML configuration editing
+- **Eemeli Aro's YAML Library**: WYSIWYG editing with anchor preservation
+- **MUI X Charts**: Data visualization components
+- **React Icons**: Material Design icons
+
+## 8. Configuration Management
+
+**YAML Editing with Inheritance**:
+- **Dual Editing Modes**: WYSIWYG editing using Eemeli Aro's YAML library (best for preserving anchors and round-trip editing) or raw file editing with Prism editor
+- **Anchor Support**: Preserve YAML anchors and aliases (WYSIWYG mode)
+- **Visual Editing**: WYSIWYG interface for configuration inheritance (WYSIWYG mode)
+- **Raw Editing**: Professional syntax highlighting and code editing (Prism editor mode)
+- **Validation**: Real-time syntax and schema validation (both modes)
+- **Testing**: Single-run validation and testing (both modes)
+
+## 9. Deployment
+
+### 9.1. Static Site Benefits
+- **Fast Loading**: Pre-built pages
+- **CDN Distribution**: Global content delivery
+- **Backend Independence**: No server-side dependencies
+- **Easy Hosting**: Deploy anywhere (Vercel, Netlify, S3)
+
+### 9.2. Self-Hosting
+- **Full Compatibility**: All features work on self-hosted deployments
+- **OAuth2 Support**: Available when frontend domain is known
+- **Custom Branding**: Configurable for organizations
+- **Environment Variables**: Backend configuration via .env files

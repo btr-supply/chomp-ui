@@ -1,0 +1,153 @@
+---
+title: 'Ingesters Overview'
+description: "Data source types and configuration for Chomp's ingestion system"
+category: 'Data Ingestion'
+order: 5
+---
+
+# Ingesters Overview
+
+Chomp supports multiple ingester types for different data sources. Each ingester type specializes in specific protocols and data collection strategies.
+
+## Available Ingester Types
+
+### Web2 & API Ingestion
+<div className="grid grid-cols-1 md:grid-cols-2 gap-4 my-6">
+
+<div className="p-4 border rounded-lg">
+
+#### HTTP & WebSocket APIs
+- **`http_api`**: REST API polling with JSON response parsing and connection pooling
+- **`ws_api`**: WebSocket streaming for real-time data feeds with handler functions
+- **`fix`**: FIX protocol integration for financial data streams *(work in progress)*
+
+</div>
+
+<div className="p-4 border rounded-lg">
+
+#### Web Scraping
+- **`static_scrapper`**: Static web scraping with CSS/XPath selectors (lxml + BeautifulSoup)
+- **`dynamic_scrapper`**: Dynamic browser automation with Playwright for JavaScript-heavy sites
+
+</div>
+
+</div>
+
+### Blockchain & Web3 Ingestion
+<div className="grid grid-cols-1 md:grid-cols-2 gap-4 my-6">
+
+<div className="p-4 border rounded-lg">
+
+#### EVM Chains (Ethereum, L2s)
+- **`evm_caller`**: Smart contract view calls using multicall pattern
+- **`evm_logger`**: Real-time event log monitoring and decoding
+
+</div>
+
+<div className="p-4 border rounded-lg">
+
+#### Alternative Blockchains
+- **`svm_caller`**: Solana account data fetching with batch optimization
+- **`sui_caller`**: Sui object data querying *(partial implementation)*
+- **`svm_logger`**: Solana transaction log monitoring *(work in progress)*
+- **`sui_logger`**: Sui event monitoring *(work in progress)*
+- **`aptos_caller`**: Aptos resource querying *(work in progress)*
+- **`aptos_logger`**: Aptos event monitoring *(work in progress)*
+- **`ton_caller`**: TON blockchain integration *(work in progress)*
+- **`ton_logger`**: TON event monitoring *(work in progress)*
+
+</div>
+
+</div>
+
+### System & Data Processing
+<div className="grid grid-cols-1 md:grid-cols-2 gap-4 my-6">
+
+<div className="p-4 border rounded-lg">
+
+#### Processing & Analytics
+- **`processor`**: Post-processing and aggregation of ingested data with custom handlers
+- **`monitor`**: System vitals collection (CPU, memory, disk I/O) for instance monitoring
+
+</div>
+
+</div>
+
+## Implementation Status
+
+### ✅ Fully Implemented
+- **Web2**: `http_api`, `ws_api`, `static_scrapper`, `dynamic_scrapper`
+- **Blockchain**: `evm_caller`, `evm_logger`, `svm_caller`
+- **System**: `processor`, `monitor`
+
+### 🔄 Partial Implementation
+- **`sui_caller`**: Basic object querying (needs multi-selector support)
+
+### 📋 Work in Progress
+- **`fix`**: FIX protocol adapter (will work like WebSocket but lower-level)
+- **All `*_logger` implementations** except EVM (follow EVM pattern for event monitoring)
+- **All `*_caller` implementations** except EVM/SVM (follow EVM pattern for view calls)
+
+## Configuration
+
+### Single vs Multiple Configuration Files
+
+Chomp supports both single and multiple configuration files with namespace isolation:
+
+```bash
+# Single configuration file
+INGESTER_CONFIGS=examples/diverse.yml
+
+# Multiple configuration files (comma-delimited)
+INGESTER_CONFIGS=ingesters/cexs.yml,ingesters/evm_dexs.yml,ingesters/processors.yml
+```
+
+### Important Configuration Behavior
+
+<div className="bg-blue-50 border-l-4 border-blue-400 p-4 my-4">
+
+**Namespace Isolation**: Each configuration file operates as an isolated namespace:
+
+- **Single Instance Scope**: An ingester instance cannot pick up jobs from multiple configuration files
+- **File-Based Namespacing**: Each config file should be considered a specific namespace (identified by the YAML filename)
+- **Job Distribution**: While jobs are distributed across multiple ingester instances, each instance only processes jobs from its assigned configuration namespace
+- **Clustering**: Multiple instances can be started for the same configuration file to scale horizontally
+
+This design ensures clear separation of concerns and prevents configuration conflicts between different ingester categories (e.g., CEX vs DEX vs processors).
+
+</div>
+
+## Architecture Patterns
+
+### Web3 Implementation Pattern
+All blockchain ingesters follow a consistent pattern:
+- **Caller types**: Recurrent querying of smart contract data/views with multicall optimization
+- **Logger types**: Real-time event listening and collection with decoding support
+
+### Connection Management
+- **HTTP APIs**: Connection pooling with automatic retry and RPC rotation
+- **WebSockets**: Persistent connections with reconnection logic and handler functions
+- **Blockchain**: Multi-RPC support with automatic failover and load balancing
+
+### Error Handling & Monitoring
+- Built-in retry mechanisms with exponential backoff
+- Resource monitoring with timing and bandwidth tracking
+- RPC rotation on failures for blockchain connections
+
+## Known Limitations
+
+<div className="bg-yellow-50 border-l-4 border-yellow-400 p-4 my-4">
+
+- **Block Reorganization**: Not yet supported on `evm_logger`, but is on the roadmap
+- **Circular Dependencies**: Processor dependencies must be acyclic
+- **Memory Usage**: WebSocket streams keep limited epochs (32) in memory for aggregation
+
+</div>
+
+## Documentation References
+
+For detailed configuration examples and parameters, see:
+- [Web2 Ingesters](./web2) - HTTP APIs, WebSockets, and scraping
+- [Web3 Ingesters](./web3) - Blockchain data ingestion
+- [Configuration Guide](../configuration) - Detailed parameter reference
+- `examples/` directory - Sample configurations

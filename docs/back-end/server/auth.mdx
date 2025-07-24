@@ -1,0 +1,897 @@
+---
+title: 'Authentication Guide'
+description: 'Complete guide to authentication methods and flows in Chomp API'
+category: 'API'
+order: 3
+---
+
+# Chomp Authentication System
+
+## Overview
+
+The Chomp API provides a unified authentication system that supports multiple authentication methods through a single, consistent interface. The system is designed to be secure, flexible, and developer-friendly.
+
+## Supported Authentication Methods
+
+- **Static Token Authentication**: Bearer token authentication for admin access
+- **Web3 Wallet Authentication**: EVM (Ethereum & cie.), SVM (Solana & cie.), and Sui wallet signature authentication
+- **OAuth2 Social Authentication**: GitHub and Twitter/X authentication
+- **Anonymous Access**: Public data retrieval with rate limiting
+
+## Authentication Architecture
+
+### Unified Authentication Flow
+
+All authentication methods follow a consistent pattern:
+
+1. **Challenge Creation** (for Web3) or **Direct Authentication** (for others)
+2. **Credential Verification**
+3. **JWT Token Generation**
+4. **Session Management**
+
+### JWT Token Management
+
+- **Token Type**: Bearer tokens using HS256 signing
+- **Expiration**: Configurable (default: 24 hours)
+- **Storage**: Redis-backed session management
+- **Claims**: User ID, authentication method, and custom claims
+
+## Authentication Methods
+
+### OAuth2 Compatibility & Limitations
+
+**OAuth2 Cannot Work on https://cho.mp** due to fundamental architectural requirements:
+
+#### The OAuth2 Callback Problem
+1. **OAuth2 providers** (GitHub, Twitter/X) require **deterministic callback URLs** to be pre-registered
+2. **OAuth2 flow requires**: Provider redirects to `${BACKEND_URL}/auth/{provider}/callback`
+3. **cho.mp connects to arbitrary backends**: Users choose any backend URL dynamically
+4. **Providers need advance knowledge**: OAuth2 callback URLs must be known and registered beforehand
+5. **cho.mp cannot predict**: Which backend URL a user will select
+
+#### When OAuth2 Works
+- **Hosted deployments**: Frontend and backend have predictable URLs
+- **Same/related domains**: Frontend and backend on related domains
+- **Pre-configured callbacks**: OAuth2 callback URLs registered with providers
+
+#### Frontend Behavior
+- **On cho.mp**: OAuth2 methods detected but greyed out with explanation
+- **On hosted deployments**: Full OAuth2 functionality available
+- **Fallback methods**: Static tokens and Web3 wallets always available
+
+### 1. Static Token Authentication
+
+Static tokens provide admin-level access and are ideal for server-to-server communication.
+
+#### Configuration
+
+```yaml
+# server-config.yml
+auth_methods: ["static"]
+static_auth_token: "your-secure-admin-token"
+```
+
+#### Usage
+
+**Request:**
+```bash
+curl -X POST "/auth/direct" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "auth_method": "static",
+    "credentials": {
+      "token": "your-secure-admin-token"
+    }
+  }'
+```
+
+**Response:**
+```json
+{
+  "access_token": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...",
+  "token_type": "bearer",
+  "user_id": "static_admin",
+  "provider": "static"
+}
+```
+
+### 2. Web3 Wallet Authentication
+
+Web3 authentication supports multiple blockchain ecosystems with signature-based verification.
+
+#### Supported Chains
+
+- **EVM (Ethereum Virtual Machine)**: Ethereum, Polygon, BSC, Arbitrum, etc.
+- **SVM (Solana Virtual Machine)**: Solana
+- **Sui**: Sui Network
+
+#### Supported Hot Wallets
+
+The Chomp frontend provides native support for **21 popular hot wallets** across all three blockchain ecosystems:
+
+##### EVM (Ethereum) Wallets - 8 Supported
+- **Safe (Gnosis)** - Multi-signature smart contract wallet
+- **MetaMask** - Browser extension and mobile wallet
+- **Rabby Wallet** - Advanced DeFi-focused browser wallet
+- **Phantom** - Multi-chain wallet supporting Ethereum
+- **Coinbase Wallet** - Self-custody wallet by Coinbase
+- **Trust Wallet** - Mobile-first multi-chain wallet
+- **Argent** - Smart contract wallet with social recovery
+- **Rainbow** - Mobile-first Ethereum wallet
+
+##### SVM (Solana) Wallets - 7 Supported
+- **Phantom** - Leading Solana wallet with browser and mobile support
+- **Solflare** - Feature-rich Solana wallet with staking support
+- **Coinbase Wallet** - Multi-chain support including Solana
+- **Backpack** - Solana-native wallet with integrated exchange
+- **Trust Wallet** - Multi-chain wallet with Solana support
+- **Ledger** - Hardware wallet integration
+- **Trezor** - Hardware wallet integration
+
+##### Sui Wallets - 6 Supported
+- **Slush** - Native Sui wallet with advanced features
+- **Phantom** - Multi-chain wallet with Sui support
+- **Suiet** - Sui-native browser extension wallet
+- **Backpack** - Multi-chain wallet supporting Sui
+- **Nightly** - Multi-chain wallet with Sui integration
+- **Surf** - Sui ecosystem wallet with DeFi features
+
+**Wallet Detection Features:**
+- **Auto-Detection**: Automatically detects installed wallets across all chains
+- **Visual Grid**: Displays all supported wallets whether installed or not
+- **Installation Guidance**: One-click links to install missing wallets
+- **Smart Matching**: Intelligent matching between detected and supported wallets
+- **Real-Time Updates**: Wallet availability updates when wallets are installed/uninstalled
+
+#### Configuration
+
+```yaml
+# server-config.yml
+auth_methods: ["evm", "svm", "sui"]
+auth_flow_expiry: 300  # Challenge expiry in seconds
+```
+
+#### Authentication Flow
+
+##### Step 1: Create Challenge
+
+**Request:**
+```bash
+curl -X POST "/auth/challenge" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "auth_method": "evm",
+    "identifier": "0x742d35Cc6634C0532925a3b8D84BA17"
+  }'
+```
+
+**Response:**
+```json
+{
+  "challenge_id": "unique_challenge_id",
+  "message": "Welcome to Chomp! By signing this message, you agree to our Terms of Service and are logging in on 15-01-2024 12:30:00 UTC.\n\nAddress: 0x742d35Cc6634C0532925a3b8D84BA17\nChallenge: abc123...\n\nThis request will not trigger a blockchain transaction or cost any gas fees.",
+  "expires_at": "2024-01-15T12:35:00Z"
+}
+```
+
+##### Step 2: Sign Message
+
+Users sign the message using their wallet. The exact implementation depends on the wallet and chain:
+
+**EVM Example (JavaScript):**
+```javascript
+const signature = await window.ethereum.request({
+  method: 'personal_sign',
+  params: [message, address]
+});
+```
+
+**Solana Example (JavaScript):**
+```javascript
+const encodedMessage = new TextEncoder().encode(message);
+const signature = await window.solana.signMessage(encodedMessage);
+```
+
+##### Step 3: Verify Signature
+
+**Request:**
+```bash
+curl -X POST "/auth/verify" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "challenge_id": "challenge_id_from_step_1",
+    "credentials": {
+      "address": "0x742d35Cc6634C0532925a3b8D84BA17",
+      "signature": "0x1234...abcd"
+    }
+  }'
+```
+
+**Response:**
+```json
+{
+  "access_token": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...",
+  "token_type": "bearer",
+  "user_id": "0x742d35Cc6634C0532925a3b8D84BA17",
+  "provider": "evm"
+}
+```
+
+### 3. OAuth2 Social Authentication
+
+OAuth2 authentication enables users to authenticate using their existing social media accounts.
+
+**⚠️ IMPORTANT LIMITATION**: OAuth2 is **NOT compatible with https://cho.mp** due to callback URL requirements. OAuth2 requires deterministic backend callback URLs that must be pre-registered with providers (GitHub, Twitter/X). Since cho.mp connects to arbitrary user-selected backends, OAuth2 providers cannot know the callback URLs in advance.
+
+**OAuth2 Works On**: Hosted deployments where frontend and backend have predictable, related domains.
+
+#### Supported Providers
+
+- **GitHub**: Full OAuth2 flow with user profile access
+- **Twitter/X**: OAuth2 flow with basic profile information
+
+#### Configuration
+
+```yaml
+# server-config.yml
+auth_methods: ["oauth2_github", "oauth2_x"]
+oauth2_client_ids:
+  github: "your-github-client-id"
+  x: "your-twitter-client-id"
+oauth2_client_secrets:
+  github: "your-github-client-secret"
+  x: "your-twitter-client-secret"
+callback_base_url: "https://your-domain.com"
+```
+
+#### Environment Variables
+
+```bash
+# Alternative to config file
+GITHUB_CLIENT_ID="your-github-client-id"
+GITHUB_CLIENT_SECRET="your-github-client-secret"
+X_CLIENT_ID="your-twitter-client-id"
+X_CLIENT_SECRET="your-twitter-client-secret"
+```
+
+#### GitHub Authentication Flow
+
+##### Step 1: Initiate OAuth2 Flow
+
+**Request:**
+```bash
+curl -X GET "/auth/github/login"
+```
+
+**Response:**
+```json
+{
+  "auth_url": "https://github.com/login/oauth/authorize?client_id=...&state=...&scope=read:user",
+  "state": "generated_state_parameter"
+}
+```
+
+##### Step 2: User Authorization
+
+Users are redirected to GitHub to authorize the application. After authorization, GitHub redirects back to the callback URL.
+
+##### Step 3: Handle Callback
+
+**Automatic Callback Handling:**
+```
+GET /auth/github/callback?code=authorization_code&state=state_value
+```
+
+**Response:**
+```json
+{
+  "access_token": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...",
+  "token_type": "bearer",
+  "user_id": "github_username",
+  "provider": "github"
+}
+```
+
+#### Twitter/X Authentication Flow
+
+Similar flow to GitHub but with Twitter/X endpoints:
+
+1. **GET `/auth/x/login`** - Get authorization URL
+2. User authorizes on Twitter
+3. **GET `/auth/x/callback`** - Handle callback and return JWT
+
+#### Direct OAuth2 Authentication
+
+For applications that handle OAuth2 flow externally:
+
+**Request:**
+```bash
+curl -X POST "/auth/direct" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "auth_method": "oauth2_github",
+    "credentials": {
+      "code": "authorization_code_from_oauth"
+    }
+  }'
+```
+
+## Session Management
+
+### JWT Token Usage
+
+Once authenticated, use the JWT token in the Authorization header for all protected endpoints:
+
+```bash
+curl -X GET "/protected-endpoint" \
+  -H "Authorization: Bearer your_jwt_token"
+```
+
+### Check Authentication Status
+
+**Request:**
+```bash
+curl -X GET "/auth/status" \
+  -H "Authorization: Bearer your_jwt_token"
+```
+
+**Response:**
+```json
+{
+  "authenticated": true,
+  "message": "Valid session",
+  "user_id": "user_identifier"
+}
+```
+
+**Note**: The current implementation has a logical issue where it uses the client IP as `user_id` for session verification instead of extracting the `user_id` from the JWT token. This should be fixed to properly extract the user ID from the JWT payload before session verification.
+
+**Correct Implementation Flow**:
+1. Extract and verify JWT token from Authorization header
+2. Get `user_id` from JWT payload
+3. Verify session using the extracted `user_id`
+4. Return authentication status with correct user information
+
+### Logout
+
+**Request:**
+```bash
+curl -X POST "/auth/logout" \
+  -H "Authorization: Bearer your_jwt_token"
+```
+
+**Response:** HTTP 204 (No Content)
+
+### Session Persistence
+
+- **Token Storage**: Sessions are stored in Redis with configurable TTL
+- **Automatic Expiry**: Tokens expire based on server configuration
+- **Session Validation**: All protected endpoints validate session status
+- **Token Refresh**: Currently requires re-authentication (refresh tokens planned)
+
+### Session Renewal
+
+**Current Status**: ✅ **Automatic session renewal IS implemented**
+
+**Configuration Variables**:
+```yaml
+# Server configuration
+session_ttl: 86400              # Session TTL in seconds (default: 24 hours)
+auto_renew_session: true        # Enable automatic session renewal (default: true)
+```
+
+**Efficient Architecture**:
+- **Single Redis Operation**: All user data (session, usage stats, rate limits) stored together
+- **Atomic Updates**: Session renewal, user activity, and statistics updated in one operation
+- **Performance Optimized**: No separate session storage - everything in User object
+
+**Behavior**:
+- When `auto_renew_session: true` (default), sessions are **automatically extended** when users interact with protected API endpoints
+- Each API request updates user activity, usage statistics, and session TTL **atomically**
+- **No multiple Redis calls** - everything happens in a single `SETEX` operation
+- Active users remain authenticated without manual intervention
+- Session data is part of the User object, eliminating redundant storage
+
+**Technical Implementation**:
+```python
+# Single Redis operation updates:
+# - Session TTL renewal
+# - User activity timestamp
+# - API usage statistics
+# - Rate limit tracking
+await redis.setex(f"user:{user_id}", session_ttl, pickle.dumps(user))
+```
+
+**Benefits**:
+- **Reduced Redis Operations**: 1 operation instead of 3+ per request
+- **Atomic Consistency**: All user data updated together
+- **Better Performance**: Fewer network round-trips to Redis
+- **Data Integrity**: Session and user data always in sync
+
+## Challenge Management
+
+### Challenge Lifecycle
+
+1. **Creation**: Challenges are created with unique IDs and expiration times
+2. **Storage**: Challenge data is stored in Redis with TTL
+3. **Verification**: One-time use - challenges are deleted after verification
+4. **Expiration**: Unused challenges automatically expire
+
+### Challenge Status
+
+**Get Challenge Status:**
+```bash
+curl -X GET "/auth/challenge/{challenge_id}"
+```
+
+**Response:**
+```json
+{
+  "challenge_id": "challenge_id",
+  "auth_method": "evm",
+  "expires_at": "2024-01-15T12:35:00Z",
+  "expired": false,
+  "time_remaining": 240
+}
+```
+
+### Cancel Challenge
+
+**Request:**
+```bash
+curl -X DELETE "/auth/challenge/{challenge_id}"
+```
+
+**Response:**
+```json
+{
+  "message": "Challenge cancelled successfully"
+}
+```
+
+## Available Methods
+
+### Get Available Methods
+
+**Request:**
+```bash
+curl -X GET "/auth/methods"
+```
+
+**Response:**
+```json
+{
+  "available_methods": [
+    "static",
+    "evm",
+    "oauth2_github"
+  ],
+  "oauth2_providers": {
+    "github": true,
+    "x": false
+  }
+}
+```
+
+## Security Features
+
+### Rate Limiting
+
+Authentication attempts are protected by exponential backoff rate limiting:
+
+- **Algorithm**: Exponential backoff with configurable parameters
+- **First Failure**: No delay
+- **Subsequent Failures**: Exponential increase (50s, 300s, 1800s, etc.)
+- **Maximum Delay**: Configurable (default: 4 days)
+- **Reset**: Successful authentication resets the counter
+
+#### Configuration
+
+```yaml
+# server-config.yml
+input_rate_limits:
+  start: 50        # Initial delay (seconds)
+  factor: 6.0      # Multiplication factor
+  max: 345600      # Maximum delay (4 days)
+```
+
+### Challenge Security
+
+- **Unique IDs**: Cryptographically secure random challenge IDs
+- **Time-Limited**: Challenges expire after configurable time (default: 5 minutes)
+- **One-Time Use**: Challenges are deleted immediately after verification
+- **Message Integrity**: Challenge messages include timestamps and address verification
+
+### JWT Security
+
+- **Signing Algorithm**: HS256 with configurable secret key
+- **Token Validation**: Comprehensive validation including expiry and signature
+- **Session Isolation**: User sessions are isolated and independently managed
+- **Secure Headers**: Proper CORS and security headers implementation
+
+## Error Handling
+
+### Common Error Responses
+
+#### Authentication Failed
+```json
+{
+  "detail": "Invalid token"
+}
+```
+
+#### Challenge Expired
+```json
+{
+  "detail": "Invalid or expired authentication challenge"
+}
+```
+
+#### Signature Verification Failed
+```json
+{
+  "detail": "Signature does not match address"
+}
+```
+
+#### Rate Limited
+```json
+{
+  "detail": "Too many failed attempts. Try again in 300 seconds."
+}
+```
+
+#### Method Disabled
+```json
+{
+  "detail": "EVM authentication not enabled"
+}
+```
+
+### HTTP Status Codes
+
+- **200**: Authentication successful
+- **204**: Logout successful
+- **400**: Bad request (invalid parameters)
+- **401**: Authentication failed
+- **404**: Challenge not found
+- **429**: Rate limit exceeded
+- **500**: Internal server error
+
+## Configuration
+
+### Server Configuration
+
+```yaml
+# server-config.yml
+auth_methods: ["static", "evm", "svm", "sui", "oauth2_github", "oauth2_x"]
+
+# Static token authentication
+static_auth_token: "your-secure-admin-token"
+
+# JWT configuration
+jwt_secret_key: "your-jwt-secret-key"
+jwt_expires_hours: 24
+
+# Challenge configuration
+auth_flow_expiry: 300  # 5 minutes
+
+# OAuth2 configuration
+oauth2_client_ids:
+  github: "your-github-client-id"
+  x: "your-twitter-client-id"
+oauth2_client_secrets:
+  github: "your-github-client-secret"
+  x: "your-twitter-client-secret"
+callback_base_url: "https://your-domain.com"
+
+# Rate limiting
+input_rate_limits:
+  start: 50
+  factor: 6.0
+  max: 345600
+```
+
+### Environment Variables
+
+```bash
+# JWT configuration
+JWT_SECRET_KEY="your-jwt-secret-key"
+
+# Static token
+STATIC_AUTH_TOKEN="your-admin-token"
+
+# OAuth2 credentials
+GITHUB_CLIENT_ID="your-github-client-id"
+GITHUB_CLIENT_SECRET="your-github-client-secret"
+X_CLIENT_ID="your-twitter-client-id"
+X_CLIENT_SECRET="your-twitter-client-secret"
+```
+
+## Integration Examples
+
+### Frontend Integration
+
+#### React Hook Example
+
+```javascript
+import { useState, useEffect } from 'react';
+
+export function useAuth() {
+  const [token, setToken] = useState(localStorage.getItem('auth_token'));
+  const [user, setUser] = useState(null);
+
+  const login = async (authMethod, credentials) => {
+    try {
+      const response = await fetch('/auth/direct', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ auth_method: authMethod, credentials })
+      });
+
+      const data = await response.json();
+      if (data.access_token) {
+        setToken(data.access_token);
+        localStorage.setItem('auth_token', data.access_token);
+        setUser({ id: data.user_id, provider: data.provider });
+        return true;
+      }
+    } catch (error) {
+      console.error('Login failed:', error);
+    }
+    return false;
+  };
+
+  const logout = async () => {
+    if (token) {
+      await fetch('/auth/logout', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+    }
+    setToken(null);
+    setUser(null);
+    localStorage.removeItem('auth_token');
+  };
+
+  const checkStatus = async () => {
+    if (!token) return false;
+
+    try {
+      const response = await fetch('/auth/status', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      const data = await response.json();
+      return data.authenticated;
+    } catch {
+      return false;
+    }
+  };
+
+  return { token, user, login, logout, checkStatus };
+}
+```
+
+#### Web3 Wallet Integration
+
+```javascript
+import { useAuth } from './useAuth';
+
+export function useWeb3Auth() {
+  const { login } = useAuth();
+
+  const loginWithWallet = async (chainType = 'evm') => {
+    try {
+      // Step 1: Get wallet address
+      const accounts = await window.ethereum.request({
+        method: 'eth_requestAccounts'
+      });
+      const address = accounts[0];
+
+      // Step 2: Create challenge
+      const challengeResponse = await fetch('/auth/challenge', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          auth_method: chainType,
+          identifier: address
+        })
+      });
+      const { challenge_id, message } = await challengeResponse.json();
+
+      // Step 3: Sign message
+      const signature = await window.ethereum.request({
+        method: 'personal_sign',
+        params: [message, address]
+      });
+
+      // Step 4: Verify signature
+      const verifyResponse = await fetch('/auth/verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          challenge_id,
+          credentials: { address, signature }
+        })
+      });
+
+      const authData = await verifyResponse.json();
+      if (authData.access_token) {
+        localStorage.setItem('auth_token', authData.access_token);
+        return true;
+      }
+    } catch (error) {
+      console.error('Web3 authentication failed:', error);
+    }
+    return false;
+  };
+
+  return { loginWithWallet };
+}
+```
+
+### Backend Integration
+
+#### Python Client Example
+
+```python
+import requests
+import time
+from typing import Optional, Dict, Any
+
+class ChompAuthClient:
+    def __init__(self, base_url: str):
+        self.base_url = base_url.rstrip('/')
+        self.token: Optional[str] = None
+
+    def login_static(self, token: str) -> bool:
+        """Login with static token"""
+        response = requests.post(f"{self.base_url}/auth/direct", json={
+            "auth_method": "static",
+            "credentials": {"token": token}
+        })
+
+        if response.status_code == 200:
+            data = response.json()
+            self.token = data["access_token"]
+            return True
+        return False
+
+    def create_web3_challenge(self, chain_type: str, address: str) -> Optional[Dict[str, Any]]:
+        """Create Web3 authentication challenge"""
+        response = requests.post(f"{self.base_url}/auth/challenge", json={
+            "auth_method": chain_type,
+            "identifier": address
+        })
+
+        if response.status_code == 200:
+            return response.json()
+        return None
+
+    def verify_web3_signature(self, challenge_id: str, address: str, signature: str) -> bool:
+        """Verify Web3 signature"""
+        response = requests.post(f"{self.base_url}/auth/verify", json={
+            "challenge_id": challenge_id,
+            "credentials": {
+                "address": address,
+                "signature": signature
+            }
+        })
+
+        if response.status_code == 200:
+            data = response.json()
+            self.token = data["access_token"]
+            return True
+        return False
+
+    def check_status(self) -> bool:
+        """Check authentication status"""
+        if not self.token:
+            return False
+
+        headers = {"Authorization": f"Bearer {self.token}"}
+        response = requests.get(f"{self.base_url}/auth/status", headers=headers)
+
+        if response.status_code == 200:
+            return response.json().get("authenticated", False)
+        return False
+
+    def logout(self) -> bool:
+        """Logout and invalidate session"""
+        if not self.token:
+            return True
+
+        headers = {"Authorization": f"Bearer {self.token}"}
+        response = requests.post(f"{self.base_url}/auth/logout", headers=headers)
+
+        if response.status_code == 204:
+            self.token = None
+            return True
+        return False
+
+    def get_headers(self) -> Dict[str, str]:
+        """Get headers with authentication"""
+        if self.token:
+            return {"Authorization": f"Bearer {self.token}"}
+        return {}
+
+# Usage example
+client = ChompAuthClient("http://localhost:40004")
+
+# Static authentication
+if client.login_static("your-admin-token"):
+    print("Authenticated successfully")
+
+    # Make authenticated requests
+    headers = client.get_headers()
+    response = requests.get(f"{client.base_url}/admin/users", headers=headers)
+    print(f"Users: {response.json()}")
+
+    # Logout
+    client.logout()
+```
+
+## Best Practices
+
+### Security
+
+1. **Use HTTPS**: Always use HTTPS in production
+2. **Secure Token Storage**: Store JWT tokens securely (not in localStorage for sensitive apps)
+3. **Token Validation**: Always validate tokens server-side
+4. **Rate Limiting**: Implement client-side rate limiting for auth attempts
+5. **Error Handling**: Don't expose sensitive error information
+
+### Performance
+
+1. **Token Caching**: Cache valid tokens to avoid repeated authentication
+2. **Connection Pooling**: Use connection pooling for high-volume applications
+3. **Async Operations**: Use async/await for non-blocking authentication flows
+4. **Challenge Cleanup**: Cancel unused challenges to free server resources
+
+### User Experience
+
+1. **Clear Error Messages**: Provide user-friendly error messages
+2. **Loading States**: Show loading indicators during authentication
+3. **Auto-Retry**: Implement automatic retry for transient failures
+4. **Session Persistence**: Handle session expiry gracefully
+
+## Troubleshooting
+
+### Common Issues
+
+#### "Invalid or expired authentication challenge"
+- **Cause**: Challenge expired or already used
+- **Solution**: Create a new challenge
+
+#### "Signature does not match address"
+- **Cause**: Wrong signature or address
+- **Solution**: Verify wallet connection and signing process
+
+#### "Too many failed attempts"
+- **Cause**: Rate limiting triggered
+- **Solution**: Wait for the specified time period
+
+#### "Authentication method not enabled"
+- **Cause**: Auth method not configured
+- **Solution**: Enable the method in server configuration
+
+### Debug Mode
+
+Enable debug logging to troubleshoot authentication issues:
+
+```yaml
+# server-config.yml
+log_level: "DEBUG"
+```
+
+### Health Checks
+
+Monitor authentication system health:
+
+```bash
+# Check available methods
+curl -X GET "/auth/methods"
+
+# Check system status
+curl -X GET "/ping"
+```
