@@ -45,7 +45,7 @@ bun run dev
 - `bun run serve` - Serve production build
 - `bun run type-check` - TypeScript type checking
 
-### Pre-Commit Requirements ⚠️
+### Pre-Commit Requirements
 
 **MANDATORY**: Before any commit, you MUST run these commands to ensure code quality:
 
